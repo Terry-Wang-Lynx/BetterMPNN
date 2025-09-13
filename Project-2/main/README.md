@@ -373,13 +373,13 @@ We particularly welcome contributions in the following areas:
 
 **1.Alternative Reward Functions**: Experiment with different reward formulations
 
-**2.****Additional Metrics**: Incorporate more AF3 output metrics into reward calculation
+**2.Additional Metrics**: Incorporate more AF3 output metrics into reward calculation
 
-**3.****Efficiency Optimization**: Improve memory usage and computational efficiency
+**3.Efficiency Optimization**: Improve memory usage and computational efficiency
 
-**4.****Visualization Enhancement**: Better training progress visualization
+**4.Visualization Enhancement**: Better training progress visualization
 
-**5.****Multi-Chain Support**: Extend to multi-chain protein complex design
+**5.Multi-Chain Support**: Extend to multi-chain protein complex design
 
 ## References
 
