@@ -1,0 +1,452 @@
+# Protein Sequence Optimization Tool Based on ProteinMPNN and AlphaFold 3
+
+## Project Overview
+
+This project develops an innovative protein sequence optimization framework that combines **ProteinMPNN** and **AlphaFold 3**. The tool employs Group Relative Policy Optimization (GRPO) reinforcement learning strategy, using AlphaFold 3's comprehensive structural metrics as reward signals to fine-tune the ProteinMPNN model, aiming to generate protein sequence variants with improved structural properties.
+
+### Core Features
+
+**Structure-Based Sequence Design**: Utilizes PDB scaffold information for informed sequence generation
+
+**GRPO Optimization**: Implements Group Relative Policy Optimization for stable reinforcement learning
+
+**Comprehensive Reward System**: Combines multiple AF3 metrics (pTM, ipTM, PAE, clashes) for balanced optimization
+
+**Singularity Container Support**: Runs AlphaFold 3 in isolated container environments
+
+**End-to-End Workflow**: Complete solution from scaffold-based design to structure evaluation
+
+### Workflow
+
+**1.Scaffold-Based Design**: Use ProteinMPNN to generate diverse protein sequence variants based on PDB structure
+
+**2.Structure Prediction**: Evaluate each variant's predicted structure quality through AlphaFold 3 in Singularity
+
+**3.Multi-Metric Reward Calculation**: Extract comprehensive structural metrics as optimization targets
+
+**4.GRPO Fine-tuning**: Iteratively optimize ProteinMPNN using group relative policy optimization
+
+**5.Token-Level Optimization**: Apply reinforcement learning at the amino acid token level for precise control
+
+## Installation Guide
+
+### Step 1: Environment Setup
+
+#### Create Conda Environment
+
+```bash
+# Create ProteinMPNN environment
+conda env create -f environment.yml
+conda activate protein-mpnn
+
+# Or create manually
+conda create -n protein-mpnn python=3.10
+conda activate protein-mpnn
+```
+
+### Step 2: ProteinMPNN Setup
+
+#### Obtain ProteinMPNN Code and Weights
+
+```bash
+# Clone or download ProteinMPNN utilities
+# Ensure protein_mpnn_utils.py and model_utils.py are in scripts directory
+
+# Download pre-trained weights to vanilla_model_weights directory
+# Available weights: v_48_002.pt, v_48_010.pt, v_48_020.pt, v_48_030.pt
+```
+
+### Step 3: AlphaFold 3 Setup with Singularity
+
+#### Obtain AlphaFold 3 Singularity Image
+
+```bash
+# Obtain AlphaFold 3 Singularity image (.sif file)
+# Place it in your designated directory
+
+# Verify Singularity installation
+singularity --version
+```
+
+#### Obtain Model Parameters
+
+> **Important**: AlphaFold 3 model parameters must be obtained following official procedures
+>
+> 1. Visit: https://github.com/google-deepmind/alphafold3
+> 2. Follow the official process to request model parameter access
+> 3. Download model parameters to the specified directory
+
+#### Download Genetic Databases
+
+```bash
+# Use official script to download databases
+./fetch_databases.sh [<database_directory>]
+
+# Or specify custom directory
+./fetch_databases.sh /path/to/your/databases
+```
+
+### Step 4: Project Configuration
+
+#### Path Configuration
+
+Edit `scripts/test-2.py` and update the following paths:
+
+```python
+# Update to your actual paths
+BASE_DIR = "/path/to/your/project/root"  # You must modify
+AF3_MODEL_DIR = "/path/to/your/alphafold3/model"  # You must modify
+AF3_DB_DIR = "/path/to/your/alphafold3/databases"  # You must modify
+AF3_SIF_PATH = "/path/to/your/alphafold3.sif"  # You must modify
+SINGULARITY_PATH = "/path/to/your/singularity/bin/singularity"  # You must modify
+
+# Scaffold PDB path (relative to project root, no modification needed if following structure)
+SCAFFOLD_PDB_PATH = os.path.join(os.path.dirname(__file__), '../input/fold_2_620.pdb')
+PATH_TO_MODEL_WEIGHTS = os.path.join(os.path.dirname(__file__), '../vanilla_model_weights/v_48_020.pt')
+```
+
+#### Input PDB Preparation
+
+Place your scaffold PDB file in the `input/` directory:
+
+```bash
+# Ensure your scaffold PDB is available
+cp your_scaffold.pdb input/fold_2_620.pdb
+```
+
+#### JSON Template Configuration
+
+Configure `config/test.json` for your target complex:
+
+```json
+{
+  "sequences": [
+    {
+      "protein": {
+        "id": "A",
+        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE",
+        "unpairedMsa": ""
+      }
+    },
+    {
+      "protein": {
+        "id": "B", 
+        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE",
+        "unpairedMsa": ""
+      }
+    }
+  ]
+}
+```
+
+## Usage Guide
+
+### Basic Usage
+
+#### Quick Start
+
+```bash
+# Ensure environment is activated
+conda activate protein-mpnn
+
+# Run the optimization workflow
+python scripts/test-2.py
+```
+
+#### Custom Scaffold and Design Chain
+
+Modify the configuration in `scripts/test-2.py`:
+
+```python
+# Change scaffold PDB file
+SCAFFOLD_PDB_PATH = "input/your_scaffold.pdb"
+
+# Change chain to design
+CHAIN_ID_TO_DESIGN = "B"  # Modify to your target chain
+```
+
+### Advanced Configuration
+
+#### Optimization Parameter Tuning
+
+Modify training parameters in `scripts/test-2.py`:
+
+```python
+# Training control parameters
+TRAINING_STEPS = 3000          # Total training steps
+NUM_GENERATIONS = 8            # Number of variants generated per step
+
+# GRPO algorithm parameters
+BETA = 0.01                    # KL divergence weight
+ADVANTAGE_SCALE_FACTOR = 5.0   # Advantage scaling factor
+REWARD_SHAPING_ALPHA = 0.7     # Reward shaping exponent
+SAMPLING_TEMPERATURE = 0.3     # Sampling temperature
+
+# Optimization parameters
+LEARNING_RATE = 1e-3           # Learning rate
+SAVE_CHECKPOINT_EVERY = 15     # Checkpoint frequency
+```
+
+#### Reward Weight Configuration
+
+Customize the reward function in `scripts/reward_utils.py`:
+
+```python
+# Adjust weights for different structural metrics
+REWARD_WEIGHTS = {
+    'ranking_score': 0.4,      # AF3 ranking score
+    'pae_reward': 0.3,         # Predicted Aligned Error
+    'iptm_reward': 0.2,        # Interface TM-score
+    'ptm_reward': 0.1,         # Protein TM-score
+    'clash_penalty': -0.5      # Steric clash penalty
+}
+```
+
+### Output Files Description
+
+After completion, the following outputs will be generated:
+
+```
+project_root/
+├── rl_checkpoint/             # Model checkpoints
+│   ├── mpnn_model_step_15.pt  # Periodically saved models
+│   └── mpnn_model_final.pt    # Final trained model
+├── rl_graph/                  # Training process visualization
+│   └── grpo_progress_step_*.png # Training charts for each step
+├── rl_rewards_log.csv         # Detailed reward metrics records
+├── af3_summary_log.txt        # AF3 summary confidence logs
+├── rl_prediction/             # AlphaFold 3 prediction results
+│   └── step_*_variant_*/      # Structure predictions for each variant
+└── rl_input/                  # AlphaFold 3 input files
+    └── step_*_variant_*/      # Input configurations for each variant
+```
+
+## Core Algorithm Features
+
+### Group Relative Policy Optimization (GRPO)
+
+The key innovation of this project is the **Group Relative Policy Optimization**, which provides stable reinforcement learning for protein sequence design:
+
+#### Implementation Principle
+
+1.**Group-Based Advantage Calculation**: Compute advantages relative to group performance rather than absolute rewards
+
+2.**Reward Shaping**: Apply non-linear transformation to increase reward differentiation
+
+3.**Token-Level Policy Optimization**: Optimize at the individual amino acid level for precise control
+
+4.**KL Divergence Regularization**: Maintain policy stability through divergence constraints
+
+#### Algorithm Advantages
+
+**·Stable Training**: Group-relative advantages reduce variance and improve convergence
+
+**·Fine-Grained Control**: Token-level optimization enables precise sequence engineering
+
+**·Multi-Metric Optimization**: Balanced reward function considers multiple structural properties
+
+**·Containerized Execution**: Singularity support ensures reproducible AF3 execution
+
+### Comprehensive Reward System
+
+Advanced reward calculation combining multiple AlphaFold 3 metrics:
+
+**·pTM Score**: Global structure quality assessment
+
+**·ipTM Score**: Interface quality for complexes
+
+**·PAE Metrics**: Local structural confidence
+
+**·Clash Detection**: Steric hindrance penalty
+
+**·Custom Weighting**: Configurable balance between different metrics
+
+## Contributing
+
+We welcome and encourage contributions to this project! Whether you want to report bugs, suggest new features, or directly submit code improvements, we greatly appreciate your input.
+
+### How to Contribute
+
+#### Reporting Issues
+
+If you find bugs or have improvement suggestions:
+
+1.Create a new Issue on GitHub
+
+2.Describe the problem or suggestion in detail
+
+3.For bugs, please provide:
+
+·System environment information (OS, CUDA version, Singularity version, etc.)
+
+·Error logs or screenshots
+
+·Steps to reproduce
+
+#### Submitting Code
+
+**1.Fork the Project**: Click the "Fork" button in the upper right corner of the GitHub page
+
+**2.Clone Your Fork**:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/Shanghaitech-China-2025-Software.git
+cd Shanghaitech-China-2025-Software
+```
+
+**3.Create Feature Branch**:
+
+```bash
+git checkout -b feature/your-feature-name
+```
+
+**4.Make Changes**:
+
+·Follow existing code style
+
+·Add appropriate comments
+
+·Update relevant documentation if modifying algorithm logic
+
+**5.Test Your Changes**:
+
+·Ensure code runs properly
+
+·Verify no existing functionality is broken
+
+**6.Commit Changes**:
+
+```bash
+git add .
+git commit -m "Add: brief description of your changes"
+```
+
+**7.Push Branch**:
+
+```bash
+git push origin feature/your-feature-name
+```
+
+**8.Create Pull Request**:
+
+·Submit Pull Request on GitHub
+
+·Describe your changes and motivation in detail
+
+### Development Guidelines
+
+#### Code Style
+
+·**Python Code**: Follow PEP 8 standards
+
+·**Variable Naming**: Use descriptive variable names
+
+·**Comments**: Add clear comments for complex logic
+
+·**Docstrings**: Add docstring descriptions for functions
+
+#### Project Structure
+
+·`scripts/`: Core algorithm implementations
+
+·`config/`: Configuration file templates
+
+·`input/`: Scaffold PDB files
+
+·`vanilla_model_weights/`: ProteinMPNN pre-trained weights
+
+·`rl_checkpoint/`: RL training checkpoints
+
+#### Testing Environment
+
+We recommend testing your changes in the following environments:
+
+·**Reduced Scale**: Use smaller training steps and fewer generations for quick testing
+
+·**Validation**: Ensure reward calculation and gradient computation are correct
+
+·**Container Testing**: Verify Singularity/AF3 integration works properly
+
+#### Priority Improvement Areas
+
+We particularly welcome contributions in the following areas:
+
+**1.Alternative Reward Functions**: Experiment with different reward formulations
+
+**2.****Additional Metrics**: Incorporate more AF3 output metrics into reward calculation
+
+**3.****Efficiency Optimization**: Improve memory usage and computational efficiency
+
+**4.****Visualization Enhancement**: Better training progress visualization
+
+**5.****Multi-Chain Support**: Extend to multi-chain protein complex design
+
+## References
+
+### Core Papers
+
+**1.ProteinMPNN**: Dauparas, J., et al. "Robust deep learning-based protein sequence design using ProteinMPNN." *Science* (2022).
+
+·Paper: https://www.science.org/doi/10.1126/science.add2187
+
+·Code: https://github.com/dauparas/ProteinMPNN
+
+**2.AlphaFold 3**: Abramson, J., et al. "Accurate structure prediction of biomolecular interactions with AlphaFold 3." *Nature* (2024).
+
+·Paper: https://www.nature.com/articles/s41586-024-07487-w
+
+·Code: https://github.com/google-deepmind/alphafold3
+
+### Algorithmic Foundation (GRPO)
+
+**3.DeepSeek-R1**: DeepSeek-AI. "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning." *arXiv* (2024).
+
+·Paper: https://github.com/deepseek-ai/DeepSeek-R1/blob/main/DeepSeek_R1.pdf
+
+·Code: https://github.com/deepseek-ai/DeepSeek-R1
+
+**4.DeepSeek-Math**: Xie, T., et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
+
+·Paper: https://arxiv.org/abs/2402.03300
+
+·Code: https://github.com/deepseek-ai/DeepSeek-Math
+
+## License and Acknowledgments
+
+### License
+
+This project is released under the [CC BY 4.0](LICENSE.txt) license.
+
+### Acknowledgments
+
+·**ProteinMPNN Developers**: For developing and open-sourcing ProteinMPNN
+
+·**Google DeepMind**: For creating AlphaFold 3 and providing model access
+
+·**ShanghaiTech University**: For providing computational resources and support
+
+### Authors
+
+·**Tianyi Wang**: the core strategist of our project, who provided a large number of high-quality ideas (we have suggested that he buy a T-shirt and a coffee cup, even though he majors in biology)
+
+·**Yafei Chang**: has something to say to some thing: "Thank you, my penguin doll. You accompanied me while debugging code late at night. I really want to include you in my list of thanks"
+
+·**Claude** (our AI Assistant): special thanks to Claude for its invaluable assistance in code writing and debugging, providing concrete technical support throughout the development process
+
+---
+
+## Disclaimer
+
+1.This software requires access to AlphaFold 3 model parameters; please ensure proper authorization from Google DeepMind before use
+
+2.This software requires Singularity/Apptainer for containerized execution
+
+3.This software is provided "as is" without any express or implied warranties
+
+4.Users are responsible for validating results for their specific applications
+
+5.Please comply with all applicable software licenses and terms of use
+
+---
+
+**Contact**: For technical questions or suggestions, please contact us through GitLab Issues or the project repository.
