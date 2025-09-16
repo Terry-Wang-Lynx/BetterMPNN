@@ -365,56 +365,6 @@ If you find bugs or have improvement suggestions:
 
 ·Steps to reproduce
 
-#### Submitting Code
-
-1.**Fork the Project**: Click the "Fork" button in the upper right corner of the GitHub page
-
-**2.Clone Your Fork**:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/Shanghaitech-China-2025-Software.git
-cd Shanghaitech-China-2025-Software
-```
-
-**3.Create Feature Branch**:
-
-```bash
-git checkout -b feature/your-feature-name
-```
-
-**4.Make Changes**:
-
-·Follow existing code style
-
-·Add appropriate comments
-
-·Update relevant documentation if modifying algorithm logic
-
-**5.Test Your Changes**:
-
-·Ensure code runs properly
-
-·Verify no existing functionality is broken
-
-**6.Commit Changes**:
-
-```bash
-git add .
-git commit -m "Add: brief description of your changes"
-```
-
-**7.Push Branch**:
-
-```bash
-git push origin feature/your-feature-name
-```
-
-**8.Create Pull Request**:
-
-·Submit Pull Request on GitHub
-
-·Describe your changes and motivation in detail
-
 ### Development Guidelines
 
 #### Code Style
