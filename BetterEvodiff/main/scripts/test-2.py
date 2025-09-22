@@ -14,6 +14,8 @@ import shutil
 import logging
 
 ## !!Attention!! Configuration Section Here!!
+from evodiff.pretrained import OA_DM_38M
+from evodiff.utils import Tokenizer
 
 # Update these paths according to your actual environment setup
 AF3_MODEL_DIR = "/path/to/your/alphafold3/model"  # You must modify
