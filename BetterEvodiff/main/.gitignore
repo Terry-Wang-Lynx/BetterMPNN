@@ -1,0 +1,17 @@
+# Environments
+evodiff/
+venv/
+.conda/
+__pycache__/
+*.pyc
+
+# Large data and output
+checkpoints/
+prediction/
+input/
+training_graphs/
+rewards_log.csv
+
+# System
+.DS_Store
+Thumbs.db
