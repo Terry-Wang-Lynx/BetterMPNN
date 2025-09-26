@@ -18,15 +18,15 @@ This project develops an innovative protein sequence optimization framework that
 
 ### Workflow
 
-1.**Sequence Generation**: Use EvoDiff to generate diverse protein sequence variants
+**1.Sequence Generation: Use EvoDiff to generate diverse protein sequence variants**
 
-2.**Structure Prediction**: Evaluate each variant's predicted structure quality through AlphaFold 3
+**2.Structure Prediction: Evaluate each variant's predicted structure quality through AlphaFold 3**
 
-3.**Reward Calculation**: Extract AlphaFold 3's ranking scores as optimization targets
+**3.Reward Calculation: Extract AlphaFold 3's ranking scores as optimization targets**
 
-4.**Model Fine-tuning**: Iteratively optimize EvoDiff using reinforcement learning policy gradient methods
+**4.Model Fine-tuning: Iteratively optimize EvoDiff using reinforcement learning policy gradient methods**
 
-5.**Multi-Path Training**: Generate multiple decoding paths for each variant to stabilize gradient estimation
+**5.Multi-Path Training: Generate multiple decoding paths for each variant to stabilize gradient estimation**
 
 ## Installation Guide
 
@@ -181,7 +181,9 @@ LEARNING_RATE = 1e-5           # Learning rate
 
 #### MSA Configuration (Optional Optimization)
 
-This project supports two MSA processing methods:
+**Critical Finding:** For small binder design tasks, only the target protein (Binding Partner) requires MSA to achieve good results, significantly reducing computational cost and time.
+
+Therefore, our project supports two MSA processing methods:
 
 ##### Option 1: Skip MSA Computation (Recommended for Performance)
 
@@ -192,6 +194,8 @@ If you have pre-computed MSA data, you can configure to skip MSA computation:
 ·Ensure MSA uses A3M format
 
 ·First sequence must be the original sequence
+
+**Note:** If you are unsure how to quickly obtain MSA information, we recommend using the online tool AlphaFold Server (https://alphafoldserver.com/) to predict the two proteins and replace the resulting MSA information into the JSON template file as required.
 
 **2.Configure Input JSON** (`config/test.json`)
 
@@ -312,8 +316,6 @@ project_root/
     └── step_*_variant_*/     # Input configurations for each variant
 ```
 
-
-
 ### Test Your Trained Model
 
 After the training is completed, you can test the model (the `.pt` file in the `rl_checkpoint` folder) saved during the training process through the following operations:
@@ -396,40 +398,6 @@ If you find bugs or have improvement suggestions:
 ·**Comments**: Add clear comments for complex logic
 
 ·**Docstrings**: Add docstring descriptions for functions
-
-#### Project Structure
-
-·`scripts/`: Core algorithm implementations
-
-·`config/`: Configuration file templates
-
-·`checkpoints/`: Model checkpoint storage
-
-·`training_graphs/`: Training visualization outputs
-
-#### Testing Environment
-
-We recommend testing your changes in the following environments:
-
-·**Minimal Configuration**: Use smaller protein sequences for quick testing
-
-·**Parameter Adjustment**: Reduce TRAINING_STEPS to shorten test time
-
-·**Error Handling**: Ensure program exits gracefully under exceptional conditions
-
-#### Priority Improvement Areas
-
-We particularly welcome contributions in the following areas:
-
-1.**Performance Optimization**: Improve algorithm efficiency or memory usage
-
-2.**Error Handling**: Enhance program robustness
-
-3.**Documentation Improvement**: Complete usage instructions or API documentation
-
-4.**Feature Extension**: Support more protein types or structures
-
-5.**Visualization Enhancement**: Improve training process visualization
 
 ### Code of Conduct
 
