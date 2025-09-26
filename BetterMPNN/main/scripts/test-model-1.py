@@ -288,9 +288,7 @@ def get_af3_reward(variant_sequence, variant_idx):
     return total_reward, reward_info
 
 
-# ================================================================================
-# SECTION 4: Main Function - Sequence Generation and Evaluation
-# ================================================================================
+### SECTION 2: Main Function
 
 def generate_and_evaluate_sequences():
     """
@@ -410,4 +408,5 @@ def generate_and_evaluate_sequences():
     return results
 
 if __name__ == '__main__':
+
     generate_and_evaluate_sequences()
