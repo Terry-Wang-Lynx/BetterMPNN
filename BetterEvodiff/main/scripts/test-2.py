@@ -223,7 +223,6 @@ python {os.path.abspath(AF3_RUN_SCRIPT)} \\
         if os.path.exists(temp_runner_script_path):
             os.remove(temp_runner_script_path)
         
-        # 新增：记录AF3摘要信息
         log_af3_summary(output_dir, step, variant_idx, variant_sequence)
             
     return reward
