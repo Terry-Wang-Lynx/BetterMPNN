@@ -6,15 +6,15 @@ This project develops an innovative protein sequence optimization framework that
 
 ### Core Features
 
-**Structure-Based Sequence Design**: Utilizes PDB scaffold information for informed sequence generation
+**·Structure-Based Sequence Design**: Utilizes PDB scaffold information for informed sequence generation
 
-**GRPO Optimization**: Implements Group Relative Policy Optimization for stable reinforcement learning
+**·GRPO Optimization**: Implements Group Relative Policy Optimization for stable reinforcement learning
 
-**Comprehensive Reward System**: Combines multiple AF3 metrics (pTM, ipTM, PAE, clashes) for balanced optimization
+**·Comprehensive Reward System**: Combines multiple AF3 metrics (pTM, ipTM, PAE, clashes) for balanced optimization
 
-**Singularity Container Support**: Runs AlphaFold 3 in isolated container environments
+**·Singularity Container Support**: Runs AlphaFold 3 in isolated container environments
 
-**End-to-End Workflow**: Complete solution from scaffold-based design to structure evaluation
+**·End-to-End Workflow**: Complete solution from scaffold-based design to structure evaluation
 
 ### Workflow
 
@@ -42,6 +42,16 @@ conda activate protein-mpnn
 # Or create manually
 conda create -n protein-mpnn python=3.10
 conda activate protein-mpnn
+```
+
+#### Install Base Dependencies
+
+```bash
+# Install PyTorch (adjust for your CUDA version)
+conda install pytorch=2.0.1 torchvision=0.15.2 cudatoolkit=11.8 -c pytorch
+
+# Install other dependencies
+pip install -r requirements.txt
 ```
 
 ### Step 2: ProteinMPNN Setup
@@ -206,6 +216,124 @@ REWARD_WEIGHTS = {
 
 **In fact, you can define your own reward function, including its composition and parameters.** Since our code related to the reward function is presented in an independent Python file (scripts/reward_utils.py), you can replace the code inside with your own defined reward function as long as the path and parameter passing are correct.
 
+#### MSA Configuration (Optional Optimization)
+
+**Critical Finding:** For small binder design tasks, only the target protein (Binding Partner) requires MSA to achieve good results, significantly reducing computational cost and time.
+
+Therefore, our project supports two MSA processing methods:
+
+##### Option 1: Skip MSA Computation (Recommended for Performance)
+
+If you have pre-computed MSA data, you can configure to skip MSA computation:
+
+**1.Prepare MSA Data**
+
+·Ensure MSA uses A3M format
+
+·First sequence must be the original sequence
+
+**Note:** If you are unsure how to quickly obtain MSA information, we recommend using the online tool AlphaFold Server (https://alphafoldserver.com/) to predict the two proteins and replace the resulting MSA information into the JSON template file as required.
+
+**2.Configure Input JSON** (`config/test.json`)
+
+The JSON file contains two protein sequences that need to be configured separately:
+
+**- Sequence A (Binding Partner Protein)**
+
+·If you want to obtain the optimized binding protein for the id=A protein, replace the "sequence" field with your target protein sequence
+
+·If you have MSA information and want to skip AF3's MSA calculation process, fill in your existing MSA information in the "unpairedMsa" field
+
+**- Sequence B (Protein to be Optimized)**
+
+·For the protein with id=B that you want to optimize, replace the "sequence" field with your protein sequence to be optimized
+
+·If you have MSA information and want to skip AF3's MSA calculation process, fill in your existing MSA information in the "unpairedMsa" field
+
+```json
+{
+  "sequences": [
+    {
+      "protein": {
+        "id": "A",
+        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE",
+        "unpairedMsa": ">A\nYOUR_BINDING_PARTNER_SEQUENCE\nOther MSA sequences..."
+      }
+    },
+    {
+      "protein": {
+        "id": "B", 
+        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE",
+        "unpairedMsa": ">B\nYOUR_TARGET_SEQUENCE_TO_OPTIMIZE\nOther MSA sequences..."
+      }
+    }
+  ]
+}
+```
+
+**3.Enable Skip MSA Mode**: Ensure AlphaFold 3 call includes `--run_data_pipeline=false`
+
+##### Option 2: Use AlphaFold 3 MSA Computation (Standard Mode)
+
+If you want AlphaFold 3 to automatically compute MSA:
+
+**1.Configure Input JSON** (`config/test.json`)
+
+Only configure sequence information, leave MSA fields empty or set to empty strings:
+
+```json
+{
+  "sequences": [
+    {
+      "protein": {
+        "id": "A",
+        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE",
+        "unpairedMsa": "",
+        "pairedMsa": ""
+      }
+    },
+    {
+      "protein": {
+        "id": "B", 
+        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE",
+        "unpairedMsa": "",
+        "pairedMsa": ""
+      }
+    }
+  ]
+}
+```
+
+**2.Modify Run Script**
+
+In the AlphaFold 3 call section of `scripts/test.py`, change:
+
+```python
+--run_data_pipeline=false
+```
+
+to:
+
+```python
+--run_data_pipeline=true
+```
+
+**3.Ensure Database Configuration is Correct**
+
+Verify the following database paths are available on your system:
+
+```python
+AF3_DB_DIR = "/path/to/your/alphafold3/databases"
+```
+
+**Important Notes**:
+
+·Using standard MSA mode will significantly increase computation time (each variant may take several hours)
+
+·Ensure sufficient computational resources and time budget
+
+·For rapid prototyping and testing, we recommend using Option 1 (skip MSA)
+
 ### Output Files Description
 
 After completion, the following outputs will be generated:
@@ -224,8 +352,6 @@ project_root/
 └── rl_input/                  # AlphaFold 3 input files
     └── step_*_variant_*/      # Input configurations for each variant
 ```
-
-
 
 ### Test Your Trained Model
 
@@ -318,55 +444,39 @@ If you find bugs or have improvement suggestions:
 
 ·**Docstrings**: Add docstring descriptions for functions
 
-#### Project Structure
+### Code of Conduct
 
-·`scripts/`: Core algorithm implementations
+To maintain a friendly, inclusive open source community, we expect all participants to:
 
-·`config/`: Configuration file templates
+·Respect different viewpoints and experience levels
 
-·`input/`: Scaffold PDB files
+·Accept constructive criticism
 
-·`vanilla_model_weights/`: ProteinMPNN pre-trained weights
+·Focus on what is best for the community
 
-·`soluble_model_weights/`: ProteinMPNN pre-trained weights
+·Show empathy and patience towards other community members
 
-·`rl_checkpoint/`: RL training checkpoints
+### Contact
 
-#### Testing Environment
+If you have any questions or need help:
 
-We recommend testing your changes in the following environments:
+·Create GitHub Issues for public discussion
 
-·**Reduced Scale**: Use smaller training steps and fewer generations for quick testing
+·Contact the maintenance team through the project repository
 
-·**Validation**: Ensure reward calculation and gradient computation are correct
-
-·**Container Testing**: Verify Singularity/AF3 integration works properly
-
-#### Priority Improvement Areas
-
-We particularly welcome contributions in the following areas:
-
-**1.Alternative Reward Functions**: Experiment with different reward formulations
-
-**2.Additional Metrics:** Incorporate more AF3 output metrics into reward calculation
-
-**3.Efficiency Optimization:** Improve memory usage and computational efficiency
-
-**4.Visualization Enhancement:** Better training progress visualization
-
-**5.Multi-Chain Support:** Extend to multi-chain protein complex design
+Thank you for contributing to protein sequence optimization research!
 
 ## References
 
 ### Core Papers
 
-1.ProteinMPNN: Dauparas, J., et al. "Robust deep learning-based protein sequence design using ProteinMPNN." *Science* (2022).
+**1.ProteinMPNN:** Dauparas, J., et al. "Robust deep learning-based protein sequence design using ProteinMPNN." *Science* (2022).
 
 ·Paper: https://www.science.org/doi/10.1126/science.add2187
 
 ·Code: https://github.com/dauparas/ProteinMPNN
 
-2.AlphaFold 3: Abramson, J., et al. "Accurate structure prediction of biomolecular interactions with AlphaFold 3." *Nature* (2024).
+**2.AlphaFold 3:** Abramson, J., et al. "Accurate structure prediction of biomolecular interactions with AlphaFold 3." *Nature* (2024).
 
 ·Paper: https://www.nature.com/articles/s41586-024-07487-w
 
@@ -374,13 +484,13 @@ We particularly welcome contributions in the following areas:
 
 ### Algorithmic Foundation (GRPO)
 
-3.DeepSeek-R1: DeepSeek-AI. "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning." *arXiv* (2024).
+**3.DeepSeek-R1:** DeepSeek-AI. "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning." *arXiv* (2024).
 
 ·Paper: https://github.com/deepseek-ai/DeepSeek-R1/blob/main/DeepSeek_R1.pdf
 
 ·Code: https://github.com/deepseek-ai/DeepSeek-R1
 
-4.DeepSeek-Math: Xie, T., et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
+**4.DeepSeek-Math:** Xie, T., et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
 
 ·Paper: https://arxiv.org/abs/2402.03300
 
@@ -394,19 +504,19 @@ This project is released under the [CC BY 4.0](LICENSE.txt) license.
 
 ### Acknowledgments
 
-·ProteinMPNN Developers: For developing and open-sourcing ProteinMPNN
+**·ProteinMPNN Developers**: For developing and open-sourcing ProteinMPNN
 
-·Google DeepMind: For creating AlphaFold 3 and providing model access
+**·Google DeepMind**: For creating AlphaFold 3 and providing model access
 
-·ShanghaiTech University: For providing computational resources and support
+**·ShanghaiTech University**: For providing computational resources and support
 
-Authors
+### Authors
 
-·Tianyi Wang: the core strategist of our project, who provided a large number of high-quality ideas (we have suggested that he buy a T-shirt and a coffee cup, even though he majors in biology)
+**·Tianyi Wang**: the core strategist of our project, who provided a large number of high-quality ideas (we have suggested that he buy a T-shirt and a coffee cup, even though he majors in biology)
 
-·Yafei Chang: has something to say to some thing: "Thank you, my penguin doll. You accompanied me while debugging code late at night. I really want to include you in my list of thanks"
+**·Yafei Chang**: has something to say to some thing: "Thank you, my penguin doll. You accompanied me while debugging code late at night. I really want to include you in my list of thanks"
 
-·Claude (our AI Assistant): special thanks to Claude for its invaluable assistance in code writing and debugging, providing concrete technical support throughout the development process
+**·Claude** (our AI Assistant): special thanks to Claude for its invaluable assistance in code writing and debugging, providing concrete technical support throughout the development process
 
 ---
 
