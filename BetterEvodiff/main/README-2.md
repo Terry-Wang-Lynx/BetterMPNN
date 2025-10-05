@@ -242,7 +242,7 @@ If you want AlphaFold 3 to automatically compute MSA:
 
 **1.Configure Input JSON** (`config/test.json`)
 
-Only configure sequence information, leave MSA fields empty or set to empty strings:
+Only configure sequence information:
 
 ```json
 {
@@ -250,17 +250,13 @@ Only configure sequence information, leave MSA fields empty or set to empty stri
     {
       "protein": {
         "id": "A",
-        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE",
-        "unpairedMsa": "",
-        "pairedMsa": ""
+        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE"
       }
     },
     {
       "protein": {
         "id": "B", 
-        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE",
-        "unpairedMsa": "",
-        "pairedMsa": ""
+        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE"
       }
     }
   ]
@@ -425,13 +421,13 @@ Thank you for contributing to protein sequence optimization research!
 
 ### Core Papers
 
-**1.EvoDiff**: Alamdari, S., et al. "Protein generation with evolutionary diffusion: sequence is all you need." *bioRxiv* (2023).
+**1.EvoDiff**: Sarah Alamdari, et al. "Protein generation with evolutionary diffusion: sequence is all you need." *bioRxiv* (2023).
 
 ·Paper: https://www.biorxiv.org/content/10.1101/2023.09.11.556673v2
 
 ·Code: https://github.com/microsoft/evodiff
 
-**2.AlphaFold 3**: Abramson, J., et al. "Accurate structure prediction of biomolecular interactions with AlphaFold 3." *Nature* (2024).
+**2.AlphaFold 3**: Josh Abramson, et al. "Accurate structure prediction of biomolecular interactions with AlphaFold 3." *Nature* (2024).
 
 ·Paper: https://www.nature.com/articles/s41586-024-07487-w
 
@@ -439,13 +435,13 @@ Thank you for contributing to protein sequence optimization research!
 
 ### Algorithmic Foundation (GRPO)
 
-**3.DeepSeek-R1**: DeepSeek-AI. "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning." arXiv preprint (2024).
+**3.DeepSeek-R1**: DeepSeek-AI. "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning." *arXiv* (2025).
 
 ·Paper: https://github.com/deepseek-ai/DeepSeek-R1/blob/main/DeepSeek_R1.pdf
 
 ·Code: https://github.com/deepseek-ai/DeepSeek-R1
 
-**4.DeepSeek-Math**: Xie, T., et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
+**4.DeepSeek-Math**:Zhihong Shao, et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
 
 ·Paper: https://arxiv.org/abs/2402.03300
 
