@@ -1,8 +1,8 @@
-# Protein Sequence Optimization Tool Based on EvoDiff and AlphaFold 3
+# BetterEvoDiff
 
-## Project Overview
+## Overview
 
-This project develops an innovative protein sequence optimization framework that combines **EvoDiff** and **AlphaFold 3**. The tool employs reinforcement learning strategies, using AlphaFold 3's ranking scores as reward signals to fine-tune the EvoDiff model, aiming to generate protein sequence variants with higher predicted structural stability.
+BetterEvoDiff is an innovative protein sequence optimization framework that combines **EvoDiff** and **AlphaFold 3**. The tool employs **reinforcement learning strategies**, using AlphaFold 3's ranking scores as reward signals to fine-tune the EvoDiff model, aiming to generate protein sequence variants with higher predicted structural stability.
 
 ### Core Features
 
@@ -18,51 +18,34 @@ This project develops an innovative protein sequence optimization framework that
 
 ### Workflow
 
-**1.Sequence Generation: Use EvoDiff to generate diverse protein sequence variants**
+**1.Sequence Generation:** Use EvoDiff to generate diverse protein sequence variants
 
-**2.Structure Prediction: Evaluate each variant's predicted structure quality through AlphaFold 3**
+**2.Structure Prediction:** Evaluate each variant's predicted structure quality through AlphaFold 3
 
-**3.Reward Calculation: Extract AlphaFold 3's ranking scores as optimization targets**
+**3.Reward Calculation:** Extract AlphaFold 3's ranking scores as optimization targets
 
-**4.Model Fine-tuning: Iteratively optimize EvoDiff using reinforcement learning policy gradient methods**
+**4.Model Fine-tuning:** Iteratively optimize EvoDiff using reinforcement learning methods
 
-**5.Multi-Path Training: Generate multiple decoding paths for each variant to stabilize gradient estimation**
+**5.Multi-Path Training:** Generate multiple decoding paths for each variant to stabilize gradient estimation
 
 ## Installation Guide
 
-### Step 1: Environment Setup
+**!! Note:** The following operations involve the use of external software. However, due to space limitations, we **will not** provide detailed installation and usage tutorials for EvoDiff and AlphaFold 3 here. **Please read the official documentation for detailed guidance.** As long as you can successfully use EvoDiff and AlphaFold 3, you can run and use this tool according to the code, structure directory, and configuration instructions we provide.
 
-#### Create Conda Environment
+### Step 1: Project and Environment Setup
 
 ```bash
-# Create EvoDiff environment
+# Clone the project repository and switch to the main directory of BetterEvoDiff
+# Create a Conda environment using environment.yml (recommended method)
 conda env create -f environment.yml
 conda activate evodiff
-
-# Or create manually
-conda create -n evodiff python=3.10
-conda activate evodiff
-```
-
-#### Install Base Dependencies
-
-```bash
-# Install PyTorch (adjust for your CUDA version)
-conda install pytorch=2.0.1 torchvision=0.15.2 cudatoolkit=11.8 -c pytorch
-
-# Install other dependencies
-pip install -r requirements.txt
 ```
 
 ### Step 2: EvoDiff Installation
 
 ```bash
-# Clone EvoDiff repository
-git clone https://github.com/microsoft/evodiff.git
-cd evodiff
-
-# Install from source
-pip install -e .
+# Install EvoDiff from the official repository
+pip install git+https://github.com/microsoft/evodiff.git
 
 # Verify installation
 python -c "from evodiff.pretrained import OA_DM_38M; print('EvoDiff installation successful')"
@@ -70,12 +53,17 @@ python -c "from evodiff.pretrained import OA_DM_38M; print('EvoDiff installation
 
 ### Step 3: AlphaFold 3 Setup
 
-#### Obtain AlphaFold 3 Code
+#### Obtaining AlphaFold 3 Source Code
+
+Install git and clone the AlphaFold 3 repository:
 
 ```bash
-git clone https://github.com/google-deepmind/alphafold3.git
-cd alphafold3
+# Clone into a directory of your choice, for example, alongside your project
+git clone https://github.com/google-deepmind/alphafold3.git /path/to/your/alphafold3
+cd /path/to/your/alphafold3
 ```
+
+Install AlphaFold 3 Dependencies: Refer to the official AlphaFold 3 documentation for the most accurate installation commands.
 
 #### Obtain Model Parameters
 
@@ -88,29 +76,20 @@ cd alphafold3
 #### Download Genetic Databases
 
 ```bash
-# Use official script to download databases (~45 minutes, 627GB)
+# Use official script to download databases
 ./fetch_databases.sh [<database_directory>]
 
 # Or specify custom directory
 ./fetch_databases.sh /path/to/your/databases
 ```
 
-#### Environment Configuration
-
-Configure appropriate modules based on your cluster environment:
-
-```bash
-# Example: Load necessary modules
-module load alphafold/3.0.0
-module load cuda/12.8
-module load cudnn/9.6.0.74_cuda12
-```
-
 ### Step 4: Project Configuration
+
+Configure your project to use the installed tools and data.
 
 #### Path Configuration
 
-Edit `scripts/test-2.py` and update the following paths:
+Edit `scripts/run_betterevodiff.py` and update the following paths:
 
 ```python
 # Update to your actual paths
@@ -152,7 +131,7 @@ chmod +x run.sh
 
 #### Custom Input Sequence
 
-Edit the base sequence in `scripts/test-2.py`:
+Edit the base sequence in `scripts/run_betterevodiff.py`:
 
 ```python
 # Replace with your target sequence to optimize
@@ -163,7 +142,7 @@ BASE_SEQUENCE = "YOUR_PROTEIN_SEQUENCE_HERE"
 
 #### Optimization Parameter Tuning
 
-Modify training parameters in `scripts/test-2.py`:
+Modify training parameters in `scripts/run_betterevodiff.py`:
 
 ```python
 # Training control parameters
@@ -242,7 +221,7 @@ If you want AlphaFold 3 to automatically compute MSA:
 
 **1.Configure Input JSON** (`config/test.json`)
 
-Only configure sequence information:
+Only configure sequence information, leave MSA fields empty or set to empty strings:
 
 ```json
 {
@@ -250,13 +229,17 @@ Only configure sequence information:
     {
       "protein": {
         "id": "A",
-        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE"
+        "sequence": "YOUR_BINDING_PARTNER_SEQUENCE",
+        "unpairedMsa": "",
+        "pairedMsa": ""
       }
     },
     {
       "protein": {
         "id": "B", 
-        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE"
+        "sequence": "YOUR_TARGET_SEQUENCE_TO_OPTIMIZE",
+        "unpairedMsa": "",
+        "pairedMsa": ""
       }
     }
   ]
@@ -265,7 +248,7 @@ Only configure sequence information:
 
 **2.Modify Run Script**
 
-In the AlphaFold 3 call section of `scripts/test.py`, change:
+In the AlphaFold 3 call section of `scripts/run_betterevodiff.py`, change:
 
 ```python
 --run_data_pipeline=false
@@ -318,7 +301,7 @@ After the training is completed, you can test the model (the `.pt` file in the `
 
 1.Put the `checkpoint/model_step_XX.pth` generated during training into the `rl_model` folder
 
-2.Modify the path and model file name in `scripts/test-model-1.py` to custom paths and models:
+2.Modify the path and model file name in `scripts/test-model-2.py` to custom paths and models:
 
 ```python
 # Put your checkpoint-model into the 'rl_model' directory
@@ -421,7 +404,7 @@ Thank you for contributing to protein sequence optimization research!
 
 ### Core Papers
 
-**1.EvoDiff**: Sarah Alamdari, et al. "Protein generation with evolutionary diffusion: sequence is all you need." *bioRxiv* (2023).
+**1.EvoDiff**: Alamdari, S., et al. "Protein generation with evolutionary diffusion: sequence is all you need." *bioRxiv* (2023).
 
 ·Paper: https://www.biorxiv.org/content/10.1101/2023.09.11.556673v2
 
@@ -441,7 +424,7 @@ Thank you for contributing to protein sequence optimization research!
 
 ·Code: https://github.com/deepseek-ai/DeepSeek-R1
 
-**4.DeepSeek-Math**:Zhihong Shao, et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
+**4.DeepSeek-Math**: Zhihong Shao, et al. "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." *arXiv* (2024).
 
 ·Paper: https://arxiv.org/abs/2402.03300
 
