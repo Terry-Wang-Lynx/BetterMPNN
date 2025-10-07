@@ -241,10 +241,10 @@ Customize the reward function in `scripts/reward_utils.py`:
 # Adjust weights for different structural metrics
 # Here is a set of examples.
 REWARD_WEIGHTS = {
-    'pae': 0.4,         # Predicted Aligned Error
-    'iptm': 0.55,        # Interface TM-score
-    'ptm_reward': 0.05,         # Protein TM-score
-    'clash_penalty': 0.1      # Steric clash penalty
+    'pae': 0.4,
+    'iptm': 0.55,
+    'ptm_reward': 0.05,
+    'clash_penalty': 0.1
 }
 ```
 
