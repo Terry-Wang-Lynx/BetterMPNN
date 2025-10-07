@@ -1,8 +1,8 @@
-# Protein Sequence Optimization Tool Based on ProteinMPNN and AlphaFold 3
+# BetterMPNN
 
-## Project Overview
+## Overview
 
-This project develops an innovative protein sequence optimization framework that combines **ProteinMPNN** and **AlphaFold 3**. The tool employs Group Relative Policy Optimization (GRPO) reinforcement learning strategy, using AlphaFold 3's comprehensive structural metrics as reward signals to fine-tune the ProteinMPNN model, aiming to generate protein sequence variants with improved structural properties.
+BetterMPNN is an innovative protein sequence optimization framework that combines **ProteinMPNN** and **AlphaFold 3**. The tool employs **Group Relative Policy Optimization (GRPO) algorithm**, using AlphaFold 3's comprehensive structural metrics as reward signals to fine-tune the ProteinMPNN model, aiming to generate protein sequence variants with improved structural properties.
 
 ### Core Features
 
@@ -18,40 +18,29 @@ This project develops an innovative protein sequence optimization framework that
 
 ### Workflow
 
-**1.Scaffold-Based Design**: Use ProteinMPNN to generate diverse protein sequence variants based on PDB structure
+**1.Scaffold-Based Design**: Use ProteinMPNN to generate diverse protein sequence variants based on PDB structure (backbones generated from RFdiffusion)
 
 **2.Structure Prediction**: Evaluate each variant's predicted structure quality through AlphaFold 3 in Singularity
 
 **3.Multi-Metric Reward Calculation**: Extract comprehensive structural metrics as optimization targets
 
-**4.GRPO Fine-tuning**: Iteratively optimize ProteinMPNN using group relative policy optimization
+**4.GRPO Fine-tuning**: Iteratively optimize ProteinMPNN using GRPO
 
 **5.Token-Level Optimization**: Apply reinforcement learning at the amino acid token level for precise control
 
 ## Installation Guide
 
-### Step 1: Environment Setup
+**!! Note:** The following operations involve the use of external software. However, due to space limitations, we **will not** provide detailed installation and usage tutorials for ProteinMPNN and AlphaFold 3 here. **Please read the official documentation for detailed guidance.** As long as you can successfully use ProteinMPNN and AlphaFold 3, you can run and use this tool according to the code, structure directory, and configuration instructions we provide.
+
+### Step 1: Project and Environment Setup
 
 #### Create Conda Environment
 
 ```bash
-# Create ProteinMPNN environment
+# Clone the project repository and switch to the main directory of BetterMPNN
+# Create environment using environment.yml (recommended method)
 conda env create -f environment.yml
 conda activate protein-mpnn
-
-# Or create manually
-conda create -n protein-mpnn python=3.10
-conda activate protein-mpnn
-```
-
-#### Install Base Dependencies
-
-```bash
-# Install PyTorch (adjust for your CUDA version)
-conda install pytorch=2.0.1 torchvision=0.15.2 cudatoolkit=11.8 -c pytorch
-
-# Install other dependencies
-pip install -r requirements.txt
 ```
 
 ### Step 2: ProteinMPNN Setup
@@ -59,7 +48,16 @@ pip install -r requirements.txt
 #### Obtain ProteinMPNN Code and Weights
 
 ```bash
-# Clone or download ProteinMPNN utilities
+# Clone the ProteinMPNN repository
+git clone https://github.com/dauparas/ProteinMPNN.git
+
+# Install ProteinMPNN
+cd ProteinMPNN
+pip install
+
+# Verify installation
+python -c "import protein_mpnn; print('ProteinMPNN installation successful')"
+
 # Ensure protein_mpnn_utils.py and model_utils.py are in scripts directory
 
 # Download pre-trained weights to vanilla_model_weights directory
@@ -70,6 +68,39 @@ pip install -r requirements.txt
 ```
 
 ### Step 3: AlphaFold 3 Setup with Singularity
+
+#### System Requirements
+
+##### Hardware Requirements
+
+1. Computing Device: A Linux system must be used (Ubuntu 22.04 LTS is recommended).
+2. GPU: NVIDIA GPU (e.g., RTX 5090, A100, H100 80GB or higer).
+3. Memory: At least 64GB of RAM (more is required when processing long - sequence targets).
+4. Storage: It is recommended to have 1TB of SSD space for storing the genetic database.
+
+##### Software dependencies
+
+* CUDA 12.6
+* cuDNN
+* Docker or Singularity
+* NVIDIA Driver
+
+**Note:**
+
+* Please refer to the official installation.md of AlphaFold3 for pre - installation and configuration.
+
+  ```
+  https://github.com/google-deepmind/alphafold3/blob/main/docs/installation.md
+  ```
+* We used Singularity, so the specific code will be based on Singularity
+
+#### Obtaining AlphaFold 3 Source Code
+
+Install git and download the AlphaFold 3 repository:
+
+```bash
+git clone https://github.com/google-deepmind/alphafold3.git
+```
 
 #### Obtain AlphaFold 3 Singularity Image
 
@@ -103,7 +134,7 @@ singularity --version
 
 #### Path Configuration
 
-Edit `scripts/test-1.py` and update the following paths:
+Edit `scripts/run_bettermpnn.py` and update the following paths:
 
 ```python
 # Update to your actual paths
@@ -163,12 +194,14 @@ Configure `config/test.json` for your target complex:
 conda activate protein-mpnn
 
 # Run the optimization workflow
-python scripts/test-1.py
+python scripts/run_bettermpnn.py
 ```
+
+Referring to the script we actually use, a `run.sh` is provided here as the script for submitting jobs on the cluster (a Slurm cluster.). After submitting this script, run_bettermpnn.py will automatically start running.
 
 #### Custom Scaffold and Design Chain
 
-Modify the configuration in `scripts/test-1.py`:
+Modify the configuration in `scripts/run_bettermpnn.py`:
 
 ```python
 # Change scaffold PDB file
@@ -182,11 +215,11 @@ CHAIN_ID_TO_DESIGN = "B"  # Modify to your target chain
 
 #### Optimization Parameter Tuning
 
-Modify training parameters in `scripts/test-1.py`:
+Modify training parameters in `scripts/run_bettermpnn.py`:
 
 ```python
 # Training control parameters
-TRAINING_STEPS = 3000          # Total training steps
+TRAINING_STEPS = 3000          # Total training steps, 
 NUM_GENERATIONS = 8            # Number of variants generated per step
 
 # GRPO algorithm parameters
@@ -196,7 +229,7 @@ REWARD_SHAPING_ALPHA = 0.7     # Reward shaping exponent
 SAMPLING_TEMPERATURE = 0.3     # Sampling temperature
 
 # Optimization parameters
-LEARNING_RATE = 1e-3           # Learning rate
+LEARNING_RATE = 1e-4           # Learning rate
 SAVE_CHECKPOINT_EVERY = 15     # Checkpoint frequency
 ```
 
@@ -206,15 +239,16 @@ Customize the reward function in `scripts/reward_utils.py`:
 
 ```python
 # Adjust weights for different structural metrics
+# Here is a set of examples.
 REWARD_WEIGHTS = {
     'pae': 0.4,         # Predicted Aligned Error
-    'iptm': 0.5,        # Interface TM-score
-    'ptm_reward': 0.1,         # Protein TM-score
+    'iptm': 0.55,        # Interface TM-score
+    'ptm_reward': 0.05,         # Protein TM-score
     'clash_penalty': 0.1      # Steric clash penalty
 }
 ```
 
-**In fact, you can define your own reward function, including its composition and parameters.** Since our code related to the reward function is presented in an independent Python file (scripts/reward_utils.py), you can replace the code inside with your own defined reward function as long as the path and parameter passing are correct.
+**In fact, you can define your own reward function, including its composition and parameters.** Since our code related to the reward function is presented in an independent Python file (scripts/reward_utils.py), you can replace the code inside with your own defined reward function.   Please make sure the path and parameter passing are correct. Note that our default reward function is composed of the prediction metrics of AlphaFold 3. If you want to design your own reward function, you also need to modify the relevant content in run_bettermpnn.py synchronously.
 
 #### MSA Configuration (Optional Optimization)
 
@@ -302,7 +336,7 @@ Only configure sequence information:
 
 **2.Modify Run Script**
 
-In the AlphaFold 3 call section of `scripts/test.py`, change:
+In the AlphaFold 3 call section of `scripts/run_bettermpnn.py`, change:
 
 ```python
 --run_data_pipeline=false
@@ -336,17 +370,17 @@ After completion, the following outputs will be generated:
 
 ```
 project_root/
-├── rl_checkpoint/             # Model checkpoints
-│   ├── mpnn_model_step_XX.pt  # Periodically saved models
-│   └── mpnn_model_final.pt    # Final trained model
-├── rl_graph/                  # Training process visualization
+├── rl_checkpoint/               # Model checkpoints
+│   ├── mpnn_model_step_XX.pt    # Periodically saved models
+│   └── mpnn_model_final.pt      # Final trained model
+├── rl_graph/                    # Training process visualization
 │   └── grpo_progress_step_*.png # Training charts for each step
-├── rl_rewards_log.csv         # Detailed reward metrics records
-├── af3_summary_log.txt        # AF3 summary confidence logs
-├── rl_prediction/             # AlphaFold 3 prediction results
-│   └── step_*_variant_*/      # Structure predictions for each variant
-└── rl_input/                  # AlphaFold 3 input files
-    └── step_*_variant_*/      # Input configurations for each variant
+├── rl_rewards_log.csv           # Detailed reward metrics records
+├── af3_summary_log.txt          # AF3 summary confidence logs
+├── rl_prediction/               # AlphaFold 3 prediction results
+│   └── step_*_variant_*/        # Structure predictions for each variant
+└── rl_input/                    # AlphaFold 3 input files
+    └── step_*_variant_*/        # Input configurations for each variant
 ```
 
 ### Test Your Trained Model
@@ -416,7 +450,7 @@ We welcome and encourage contributions to this project! Whether you want to repo
 
 If you find bugs or have improvement suggestions:
 
-1.Create a new Issue on GitHub
+1.Create a new Issue on GitLab
 
 2.Describe the problem or suggestion in detail
 
@@ -456,7 +490,7 @@ To maintain a friendly, inclusive open source community, we expect all participa
 
 If you have any questions or need help:
 
-·Create GitHub Issues for public discussion
+·Create GitLab Issues for public discussion
 
 ·Contact the maintenance team through the project repository
 
@@ -530,4 +564,4 @@ This project is released under the [CC BY 4.0](LICENSE.txt) license.
 
 ---
 
-Contact: For technical questions or suggestions, please contact us through GitLab Issues or the project repository.
+**Contact:** For technical questions or suggestions, please contact us through GitHub Issues or the project repository.
