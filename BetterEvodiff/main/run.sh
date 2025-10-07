@@ -15,4 +15,4 @@ export PYTHONUNBUFFERED=1
 nvidia-smi
 
 # Execute the main optimization script
-python scripts/test-2.py
+python scripts/run_betterevodiff.py
