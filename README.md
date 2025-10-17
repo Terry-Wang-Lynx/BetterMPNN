@@ -578,4 +578,4 @@ This project is released under the CC BY 4.0 license.
 
 **Contact:** For technical questions or suggestions, please contact us through GitHub Issues or the project repository.
 
-**Extra benefits:** In addition to BetterMPNN, we also provide another tool called **BetterEvoDiff**. You can find detailed introductions and usage instructions in the **README.md** file in the **BetterEvoDiff** directory.
+**Extra Benefits:** In addition to BetterMPNN, we also provide another tool called **BetterEvoDiff**. You can find the codes, detailed introductions and usage instructions in the **BetterEvoDiff** directory.
