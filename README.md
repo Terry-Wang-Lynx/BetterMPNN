@@ -10,7 +10,7 @@ The results indicate **a hit rate of approximately 83%** for effective binding, 
 
 Below are the SPR curves and relevant indicators for two of these results.
 
-![result-1.png](assets/images/result-1.png)
+![result-1.png](assets/images/BM-result-1.png)
 
 ## Overview
 
