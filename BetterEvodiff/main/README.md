@@ -434,7 +434,7 @@ Thank you for contributing to protein sequence optimization research!
 
 ### License
 
-This project is released under the [CC BY 4.0](LICENSE.txt) license.
+This project is released under the CC BY 4.0 license.
 
 ### Acknowledgments
 
