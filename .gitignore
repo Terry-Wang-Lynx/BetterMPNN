@@ -1,0 +1,47 @@
+# Environments
+protein-mpnn/
+venv/
+.conda/
+__pycache__/
+*.pyc
+
+# Large data and output
+rl_checkpoint/
+rl_prediction/
+rl_input/
+rl_graph/
+rl_rewards_log.csv
+af3_summary_log.txt
+
+# AlphaFold 3 related
+*.sif
+alphafold3/
+model/
+dataset/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+_run_af3.sh
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large data files
+*.cif
+*.h5
+*.hdf5

@@ -1,0 +1,26 @@
+name: protein-mpnn
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - cudatoolkit=11.8
+  - biopython=1.85
+  - matplotlib=3.10.6
+  - pandas=2.3.2
+  - tqdm=4.67.1
+  - typing_extensions=4.12.2
+  - pip:
+    - torch==2.7.0+cu118
+    - torchaudio==2.7.0+cu118
+    - torchvision==0.22.0+cu118
+    - nvidia-cudnn-cu11==8.5.0.96
+    - filelock==3.13.1
+    - jinja2==3.1.4
+    - networkx==3.3
+    - sympy==1.13.3
+    - packaging==25.0
+    - pillow==11.0.0
+# Attention!! ProteinMPNN must be installed from source
