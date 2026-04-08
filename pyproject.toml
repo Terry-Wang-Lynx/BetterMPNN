@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "bettermpnn"
+version = "0.1.0"
+description = "GRPO-based reinforcement learning for protein sequence optimization"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy",
+    "biopython",
+    "matplotlib",
+    "tqdm",
+    "scipy",
+    "pyyaml",
+]
+
+[project.scripts]
+bettermpnn = "bettermpnn.cli:main"

@@ -1,0 +1,65 @@
+# BetterMPNN Example Configuration
+#
+# This is a template. Copy and modify for your specific task.
+# All paths should be adjusted to your environment.
+
+# --- Input ---
+pdb: "examples/scaffold.pdb"         # Scaffold PDB (must contain target + binder chains)
+chain: "A"                            # Chain ID to redesign (the binder)
+
+# --- ProteinMPNN ---
+mpnn_weights: "weights/vanilla/v_48_020.pt"
+
+# --- Training ---
+steps: 200                            # Total GRPO training steps
+variants: 8                           # Sequences generated per step
+lr: 1e-4                              # Learning rate
+beta: 0.01                            # KL penalty coefficient
+temperature: 0.3                      # MPNN sampling temperature
+grad_clip: 1.0                        # Gradient clipping norm
+iterative: false                      # Update backbone each step (hallucination mode)
+
+# --- Advantage Shaping ---
+reward_shaping_alpha: 0.7             # Power-law reward shaping exponent
+advantage_scale_factor: 5.0           # Fallback scaling when std is small
+
+# --- Checkpointing ---
+save_every: 10                        # Save checkpoint every N steps (0 = off)
+
+# --- Output ---
+output_dir: "output"
+
+# --- Environment ---
+# The environment section defines the "black box" that scores sequences.
+# This example uses AlphaFold 3 via Singularity container.
+# You can implement your own Environment class for other predictors.
+environment:
+  type: "alphafold3"
+
+  # Container mode (Singularity/Apptainer):
+  af3_sif: "/path/to/alphafold3.sif"
+  af3_run_dir: "/path/to/alphafold3"
+  af3_model_dir: "/path/to/alphafold3/model"
+  af3_db_dir: "/path/to/alphafold3/dataset"
+  apptainer_path: "singularity"
+
+  # Direct mode (conda environment, no container):
+  # Set af3_sif to "" and provide af3_env_script instead.
+  # af3_sif: ""
+  # af3_env_script: "/path/to/af3_env.sh"
+
+  # AF3 input template (must include unpairedMsa and pairedMsa for each chain)
+  template_json: "configs/af3_template.json"
+
+  # Skip MSA computation (use pre-computed MSA in template)
+  run_data_pipeline: false
+
+  # Index of the designed chain in the JSON sequences list
+  design_chain_index: 0
+
+  # Reward weights (must sum to ~1.0 before clash penalty)
+  reward_weights:
+    iptm: 0.55                        # Interface TM-score
+    ptm: 0.05                         # Protein TM-score
+    pae: 0.4                          # Predicted Aligned Error (inverted)
+    clash_penalty: 0.1                # Steric clash penalty
