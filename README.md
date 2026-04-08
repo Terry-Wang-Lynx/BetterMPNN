@@ -1,4 +1,4 @@
-# BetterMPNN
+<h1 align="center">BetterMPNN</h1>
 
 BetterMPNN is a reinforcement learning driven framework for protein sequence deep optimization. We use **Group Relative Policy Optimization (GRPO)** to fine-tune ProteinMPNN in specific tasks, enabling efficient protein sequence design through an exploration-evaluation-optimization loop. With a pluggable structure prediction environment as the reward signal, the framework can complete the design process from backbone to high-performance binding proteins within hours.
 
