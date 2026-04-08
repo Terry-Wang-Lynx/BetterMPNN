@@ -153,6 +153,7 @@ class MyPredictor(Environment):
 - Yafei Chang (常雅斐)
 
 **Wet Lab Validation**
+- Tianyi Wang (王天颐)
 - Yuchen Hao (郝郁晨)
 - ShanghaiTech-iGEM-2025
 
