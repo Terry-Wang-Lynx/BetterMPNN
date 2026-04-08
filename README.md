@@ -146,6 +146,16 @@ class MyPredictor(Environment):
 - **AlphaFold 3:** J. Abramson, et al. *Nature* (2024). [Paper](https://www.nature.com/articles/s41586-024-07487-w) | [Code](https://github.com/google-deepmind/alphafold3)
 - **GRPO:** DeepSeek-AI. (2025). [Paper](https://github.com/deepseek-ai/DeepSeek-R1/blob/main/DeepSeek_R1.pdf)
 
+## Contributors
+
+**Design & Development**
+- Tianyi Wang (王天颐)
+- Yafei Chang (常雅斐)
+
+**Wet Lab Validation**
+- Yuchen Hao (郝郁晨)
+- ShanghaiTech-iGEM-2025
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
