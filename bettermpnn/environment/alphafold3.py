@@ -55,19 +55,22 @@ class AlphaFold3Environment(Environment):
 
     def __init__(self, config: EnvironmentConfig, output_dir: str = "output",
                  target_smiles: str = "", scaffold_name: str = "",
-                 ligand_name: str = ""):
+                 ligand_name: str = "", design_chain_id: str = "A"):
         self.config = config
         self.output_dir = output_dir
         self.scaffold_name = scaffold_name
         self.ligand_name = ligand_name
+        # Chain ID used for Cα extraction when computing RMSD rewards.
+        self.design_chain_id = design_chain_id
         self.input_dir = os.path.join(output_dir, "af3_inputs")
         self.prediction_dir = os.path.join(output_dir, "af3_predictions")
         os.makedirs(self.input_dir, exist_ok=True)
         os.makedirs(self.prediction_dir, exist_ok=True)
 
         # Optional reference Cα coords for conformational-change reward during
-        # training mode. Left as None unless a caller injects them; the sampler
-        # passes references explicitly as method arguments instead.
+        # training mode. Populated by the Trainer from config.open_ref_pdb /
+        # config.closed_ref_pdb; the sampler passes references explicitly as
+        # method arguments instead.
         self.open_ref_ca: Optional["np.ndarray"] = None
         self.closed_ref_ca: Optional["np.ndarray"] = None
         self._chain_len_warned = False
@@ -108,22 +111,16 @@ class AlphaFold3Environment(Environment):
         # 4. Find structure path (for iterative mode or RMSD calculation)
         structure_path = self._find_structure_path(output_dir)
 
-        # 5. Calculate RMSD for reward (if refs provided)
-        # This is CRITICAL for conformational-change reward during training
-        if structure_path and os.path.exists(structure_path):
+        # 5. Calculate RMSD for the conformational-change reward, when the
+        # Trainer has injected reference Cα coordinates (open/closed states).
+        if structure_path and os.path.exists(structure_path) and (
+            self.open_ref_ca is not None or self.closed_ref_ca is not None
+        ):
             try:
-                # We reuse the logic from evaluate_all_seeds conceptually
-                # But here we inject it into the metrics for _calculate_reward
-                from ..utils.rmsd import calculate_rmsd
-                pred_ca = extract_ca_from_cif(structure_path, "A") # Assume A for training target
-                
-                # Check for references provided via env config or trainer
-                # Note: In training mode, refs are usually set in the config
-                # but we'll try to find them if they exist
-                if hasattr(self, 'open_ref_ca') and self.open_ref_ca is not None:
-                    # If Sampler-style refs are already loaded
+                pred_ca = extract_ca_from_cif(structure_path, self.design_chain_id)
+                if self.open_ref_ca is not None:
                     metrics["open_rmsd"] = calculate_rmsd(pred_ca, self.open_ref_ca, align=True)
-                if hasattr(self, 'closed_ref_ca') and self.closed_ref_ca is not None:
+                if self.closed_ref_ca is not None:
                     metrics["closed_rmsd"] = calculate_rmsd(pred_ca, self.closed_ref_ca, align=True)
             except Exception as e:
                 logger.debug(f"Training RMSD calc failed: {e}")
@@ -319,11 +316,21 @@ class AlphaFold3Environment(Environment):
                 f"Verify design_chain_index matches the chain you redesign."
             )
         chain["sequence"] = sequence
-        # Update MSA fields (replace the sequence line in each)
+        # Update the MSA. The designed chain is expected to use a single-sequence
+        # MSA (a ">name\nSEQUENCE" block); we replace that query line. A
+        # multi-record MSA on the designed chain cannot be updated this way, so
+        # warn rather than silently corrupting alignment columns.
         for msa_key in ("unpairedMsa", "pairedMsa"):
             msa = chain.get(msa_key, "")
             if msa:
                 lines = msa.splitlines()
+                if sum(1 for ln in lines if ln.startswith(">")) > 1:
+                    self._warn_once_chain_len(
+                        f"Designed chain {msa_key} has multiple MSA records; "
+                        f"only single-sequence MSA is supported for the redesigned "
+                        f"chain. The query line will be replaced but other records "
+                        f"are left stale — provide a single-sequence MSA instead."
+                    )
                 if len(lines) >= 2:
                     lines[1] = sequence
                 chain[msa_key] = "\n".join(lines)
@@ -525,7 +532,13 @@ class AlphaFold3Environment(Environment):
             best_decoy_cif = None
 
             if not success:
-                logger.warning(f"Decoy AF3 failed for {job_name}, assuming pass")
+                # Fail closed: a decoy run we could not evaluate must not be
+                # counted as evidence of specificity, or a non-specific binder
+                # could slip through the screen on infrastructure flakiness.
+                logger.warning(
+                    f"Decoy AF3 failed for {job_name}; marking specificity as NOT passed (fail-closed)"
+                )
+                dr.passed_specificity = False
                 decoy_results.append(dr)
                 continue
 
@@ -660,6 +673,10 @@ class AlphaFold3Environment(Environment):
                 f" --run_data_pipeline={'true' if cfg.run_data_pipeline else 'false'}"
                 f" --run_inference=true"
             )
+            # The data pipeline needs the genetic databases; container mode always
+            # binds them, so mirror that here when the pipeline is enabled.
+            if cfg.run_data_pipeline and cfg.af3_db_dir:
+                shell_cmd += f" --db_dir={cfg.af3_db_dir}"
             cmd = ["bash", "-c", shell_cmd]
 
         logger.info(f"Running AF3 for {job_name}...")
@@ -734,13 +751,29 @@ class AlphaFold3Environment(Environment):
             return None
 
     def _extract_mean_pae(self, data: dict) -> float:
-        """Extract mean inter-chain PAE from AF3 output."""
-        chain_pair_pae = data.get("chain_pair_pae_min", [])
-        if len(chain_pair_pae) >= 2:
-            a_to_b = chain_pair_pae[0][1] if len(chain_pair_pae[0]) > 1 else PAE_MAX
-            b_to_a = chain_pair_pae[1][0] if len(chain_pair_pae) > 1 else PAE_MAX
-            return (a_to_b + b_to_a) / 2.0
-        return PAE_MAX
+        """Mean inter-chain PAE between the designed chain and every other chain.
+
+        Uses ``chain_pair_pae_min`` (a square matrix indexed by chain order in
+        the template) and the configured ``design_chain_index`` rather than
+        assuming the interface is chains 0/1, so it stays correct when the
+        designed chain is not first or when extra chains/ligands are present.
+        """
+        m = data.get("chain_pair_pae_min", [])
+        n = len(m)
+        if n < 2:
+            return PAE_MAX
+        i = self.config.design_chain_index
+        if not (0 <= i < n):
+            i = 0  # fall back to the first chain if the index is out of range
+        vals = []
+        for j in range(n):
+            if j == i:
+                continue
+            if i < len(m) and j < len(m[i]):
+                vals.append(m[i][j])
+            if j < len(m) and i < len(m[j]):
+                vals.append(m[j][i])
+        return sum(vals) / len(vals) if vals else PAE_MAX
 
     def _calculate_reward(self, metrics: dict) -> float:
         """Calculate weighted reward from structural metrics."""

@@ -260,10 +260,6 @@ class Sampler:
                     logger.info(f"  Variant {i}: ✗ FAILED specificity (responds to interferent)")
                     # NOTE: We do NOT set variant_has_pass = False here because we still
                     # want to log the structural-only success in the CSV and folders.
-            elif variant_has_pass:
-                # No decoy testing configured, structural pass = final pass
-                self.total_passed_with_specificity += 1
-                self.specific_variants.add((step, i))
 
             # --- Log all seed results and extract structures ---
             if variant_has_pass:

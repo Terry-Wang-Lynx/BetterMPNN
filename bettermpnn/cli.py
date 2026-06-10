@@ -93,6 +93,7 @@ def main():
         target_smiles=config.effective_target_smiles,
         scaffold_name=config.scaffold.name,
         ligand_name=config.ligand.name,
+        design_chain_id=config.design_chain_id,
     )
 
     if config.mode == "sample":

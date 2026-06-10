@@ -46,8 +46,19 @@ class MPNNModel:
 
     @classmethod
     def load(cls, weights_path: str, device: str = "cuda") -> "MPNNModel":
-        """Load a ProteinMPNN model from checkpoint."""
-        checkpoint = torch.load(weights_path, map_location=device, weights_only=False)
+        """Load a ProteinMPNN model from checkpoint.
+
+        Prefers the safe ``weights_only=True`` loader; falls back to the legacy
+        loader only if the checkpoint format requires it (older torch).
+        """
+        try:
+            checkpoint = torch.load(weights_path, map_location=device, weights_only=True)
+        except Exception:
+            logger.warning(
+                "weights_only=True load failed; falling back to weights_only=False "
+                "(only load checkpoints you trust)"
+            )
+            checkpoint = torch.load(weights_path, map_location=device, weights_only=False)
         num_edges = checkpoint["num_edges"]
 
         model = ProteinMPNN(

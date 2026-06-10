@@ -1,10 +1,9 @@
 """Unified configuration for BetterMPNN."""
 
-import os
+import re
 import yaml
 from dataclasses import dataclass, field
 from typing import List, Optional
-import re
 
 
 @dataclass
@@ -229,16 +228,3 @@ class Config:
         data = dataclasses.asdict(self)
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-
-    def resolve_paths(self, base_dir: str = "") -> None:
-        """Resolve relative paths against a base directory."""
-        if not base_dir:
-            return
-        for attr in ("pdb", "mpnn_weights", "output_dir"):
-            val = getattr(self, attr)
-            if val and not os.path.isabs(val):
-                setattr(self, attr, os.path.join(base_dir, val))
-        for attr in ("af3_sif", "af3_run_dir", "af3_model_dir", "af3_db_dir", "template_json"):
-            val = getattr(self.environment, attr)
-            if val and not os.path.isabs(val):
-                setattr(self.environment, attr, os.path.join(base_dir, val))

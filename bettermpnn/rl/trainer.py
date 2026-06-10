@@ -34,8 +34,35 @@ class Trainer:
         self.optimizer = optim.Adam(mpnn.model.parameters(), lr=config.lr)
         self.current_pdb = config.pdb
 
+        # Load reference structures so conformational-change RMSD reward terms
+        # (reward_weights.open_rmsd / closed_rmsd) are actually applied in train
+        # mode. Without this the env never computes those metrics.
+        self._load_reference_structures()
+
         os.makedirs(config.output_dir, exist_ok=True)
         self._init_csv_log()
+
+    def _load_reference_structures(self) -> None:
+        """Inject open/closed reference Cα coords into the environment, if set."""
+        cfg = self.config
+        if not (cfg.open_ref_pdb or cfg.closed_ref_pdb):
+            return
+        if not hasattr(self.env, "open_ref_ca"):
+            return  # custom environment without RMSD support
+        from ..utils.structure import extract_ca_from_pdb
+        for attr, path, name in (
+            ("open_ref_ca", cfg.open_ref_pdb, "open"),
+            ("closed_ref_ca", cfg.closed_ref_pdb, "closed"),
+        ):
+            if path and os.path.exists(path):
+                try:
+                    ca = extract_ca_from_pdb(path, cfg.design_chain_id)
+                    setattr(self.env, attr, ca)
+                    logger.info(f"Loaded {name} reference ({len(ca)} Cα) from {path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load {name} reference {path}: {e}")
+            elif path:
+                logger.warning(f"{name} reference PDB not found: {path}")
 
     def _init_csv_log(self):
         """Initialize the per-variant CSV log file."""
@@ -179,24 +206,44 @@ class Trainer:
 
         rewards = torch.tensor([r.score for r in results], device=self.device)
 
-        # --- GRPO update ---
-        advantages = compute_advantages(
-            rewards,
-            shaping_alpha=cfg.reward_shaping_alpha,
-            scale_factor=cfg.advantage_scale_factor,
-        )
+        # Exclude variants whose AF3 evaluation failed. Their placeholder
+        # score=0.0 would otherwise shift the group baseline and inject a
+        # spurious gradient into the GRPO update.
+        valid = [i for i, r in enumerate(results) if "error" not in r.metrics]
+        n_failed = len(results) - len(valid)
+        if n_failed:
+            logger.warning(
+                f"  {n_failed}/{len(results)} variant(s) failed AF3; excluded from the GRPO update"
+            )
 
         current_logps = self.mpnn.compute_log_probs(samples)
         with torch.no_grad():
             ref_logps = self.ref_mpnn.compute_log_probs(samples)
-
         mask = self.mpnn.loss_mask(samples)
-        grpo = compute_grpo_loss(current_logps, ref_logps, advantages, mask, cfg.beta)
 
-        self.optimizer.zero_grad()
-        grpo.loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.mpnn.model.parameters(), max_norm=cfg.grad_clip)
-        self.optimizer.step()
+        # --- GRPO update over the successful variants only ---
+        loss_val = kl_val = policy_loss_val = 0.0
+        if len(valid) >= 2:
+            idx = torch.tensor(valid, device=self.device)
+            advantages = compute_advantages(
+                rewards[idx],
+                shaping_alpha=cfg.reward_shaping_alpha,
+                scale_factor=cfg.advantage_scale_factor,
+            )
+            grpo = compute_grpo_loss(
+                current_logps[idx], ref_logps[idx], advantages, mask[idx], cfg.beta
+            )
+            self.optimizer.zero_grad()
+            grpo.loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.mpnn.model.parameters(), max_norm=cfg.grad_clip)
+            self.optimizer.step()
+            loss_val, kl_val, policy_loss_val = (
+                grpo.loss.item(), grpo.kl.item(), grpo.policy_loss.item(),
+            )
+        else:
+            logger.warning(
+                "  Fewer than 2 successful variants this step; skipping the GRPO update"
+            )
 
         # --- Iterative backbone update ---
         if cfg.iterative:
@@ -206,16 +253,17 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Per-step summary with best/worst tracking
-        scores = [r.score for r in results]
+        # Per-step summary with best/worst tracking (over successful variants)
+        scores = [results[i].score for i in valid] or [r.score for r in results]
         return {
             "step": step + 1,
-            "mean_reward": rewards.mean().item(),
+            "mean_reward": float(np.mean(scores)),
             "max_reward": max(scores),
             "min_reward": min(scores),
-            "loss": grpo.loss.item(),
-            "kl": grpo.kl.item(),
-            "policy_loss": grpo.policy_loss.item(),
+            "n_failed": n_failed,
+            "loss": loss_val,
+            "kl": kl_val,
+            "policy_loss": policy_loss_val,
             **{k: float(np.mean(v)) for k, v in metrics_acc.items()},
         }
 
