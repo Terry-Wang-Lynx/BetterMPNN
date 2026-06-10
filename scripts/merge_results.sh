@@ -27,13 +27,21 @@ for f in "${OUTPUT_DIR}"/screening_log_step*.csv; do
     tail -n +2 "${f}" >> "${MERGED}"
 done
 
-# Count results
-TOTAL=$(tail -n +2 "${MERGED}" | wc -l)
-PASSED=$(grep -c ",PASS," "${MERGED}" || true)
+# Count results: locate the 'final_pass' column by header name and count rows
+# where it equals PASS (the CSV has several columns that can hold "PASS").
+read -r TOTAL PASSED < <(awk -F',' '
+    NR==1 { for (i=1;i<=NF;i++) if ($i=="final_pass") col=i; next }
+    { total++; if (col && $col=="PASS") passed++ }
+    END { printf "%d %d\n", total+0, passed+0 }
+' "${MERGED}")
 
 echo "Merged ${TOTAL} seed records into ${MERGED}"
-echo "  Passed: ${PASSED}"
-echo "  Pass rate: $(echo "scale=2; ${PASSED}*100/${TOTAL}" | bc)%"
+echo "  Passed (final_pass): ${PASSED}"
+if [ "${TOTAL}" -gt 0 ]; then
+    awk -v p="${PASSED}" -v t="${TOTAL}" 'BEGIN { printf "  Pass rate: %.2f%%\n", 100*p/t }'
+else
+    echo "  Pass rate: n/a (no records)"
+fi
 
 # Merge summaries
 python3 -c "

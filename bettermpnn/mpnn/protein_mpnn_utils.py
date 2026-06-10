@@ -1,3 +1,7 @@
+# This file is vendored verbatim from ProteinMPNN (https://github.com/dauparas/ProteinMPNN).
+# Copyright (c) 2022 Justas Dauparas et al. Licensed under the MIT License.
+# Reference: J. Dauparas et al., "Robust deep learning-based protein sequence
+# design using ProteinMPNN," Science 378, 49-56 (2022).
 from __future__ import print_function
 import json, time, os, sys, glob
 import shutil

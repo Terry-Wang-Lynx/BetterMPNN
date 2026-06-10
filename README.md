@@ -27,17 +27,15 @@ Both modes support **small-molecule ligands** (SMILES), **residue-level design s
 
 The included AF3 environment combines: `Reward = a * (1 - PAE / PAE_MAX) + b * ipTM + c * pTM - d * clash_penalty`
 
-By pre-computing the target's MSA and skipping the binder MSA step, each AF3 evaluation takes ~90 seconds.
+By pre-computing the target's MSA and running AF3 in inference-only mode (no data pipeline), each evaluation takes on the order of a minute on a modern data-center GPU; exact timing depends on the GPU, sequence lengths, and the number of diffusion samples and recycles.
 
 ## Results
 
-**Binder Design (GZMK Binder for Colloidal Gold Test Strip)**
+The following are wet-lab validation results from our own application of BetterMPNN (ShanghaiTech-iGEM-2025). The candidate sequences and assay data belong to that project and are not reproducible from this repository alone; the numbers are reported here for context.
 
-SPR validation on binder candidates randomly selected from the Final Sequence Pool **without virtual screening**: **83% hit rate (10/12)**, all binders demonstrating micromolar-level affinity. In comparison, the conventional RFdiffusion pipeline achieved a hit rate of only 3.5% (2/57) on the same target.
+**Binder design — GZMK binder for a colloidal-gold test strip.** Candidates were drawn at random from the final sequence pool **without any virtual screening** and characterized by surface plasmon resonance (SPR): **10 of 12 (83%)** bound with micromolar-level affinity. A conventional RFdiffusion pipeline on the same target gave 2 of 57 (3.5%) under comparable selection.
 
-**Gas-Sensitive Material Design (Odorant Binding Protein)**
-
-Applied to odorant binding protein (OBP) design as gas-sensitive materials, achieving **micromolar-level affinity** for target odorant molecules.
+**Odorant-binding protein (OBP) for gas sensing.** Applied to OBP design as a gas-sensitive material, producing designs with micromolar-level affinity for the target odorant molecules.
 
 **Training Trajectories**
 
@@ -69,8 +67,9 @@ pip install -r requirements.txt
 Download ProteinMPNN weights:
 
 ```bash
-cd weights/vanilla/
-wget https://files.ipd.uw.edu/pub/training_sets/ProteinMPNN/v_48_020.pt
+mkdir -p weights/vanilla
+wget -P weights/vanilla \
+    https://files.ipd.uw.edu/pub/training_sets/ProteinMPNN/v_48_020.pt
 ```
 
 **Run**
@@ -106,9 +105,11 @@ Sampling outputs land in `passed/` (cleared all filters incl. specificity),
 2. **AF3 template JSON** — sequences with pre-computed MSA (`configs/af3_template.json`)
 3. **Config YAML** — training parameters (`configs/example.yaml`)
 
-Only the target needs a rich MSA. The binder uses single-sequence MSA. Obtain MSA from [AlphaFold Server](https://alphafoldserver.com/) or Jackhmmer.
+Only the target needs a rich MSA; the redesigned chain uses a single-sequence MSA. Obtain the target MSA from the [AlphaFold Server](https://alphafoldserver.com/) or Jackhmmer and paste it into the corresponding chain's `unpairedMsa`/`pairedMsa` field in the template JSON (AF3 A3M format). For the redesigned chain, keep a single-sequence MSA: a two-line `>name\n<SEQUENCE>` block whose second line is the query sequence — BetterMPNN substitutes each designed sequence into that line at runtime.
 
 **Key Parameters**
+
+The "Default" column below shows the values used in `configs/example.yaml`; the dataclass defaults in `bettermpnn/config.py` are more conservative (e.g. `steps=10`) and are overridden by any value you set in the config.
 
 | Parameter | Default | Description |
 |:--|:--|:--|
