@@ -1,0 +1,82 @@
+# BetterMPNN — Large-scale Sampling example (frozen MPNN, no RL update)
+#
+# Sampling mode runs a frozen ProteinMPNN, evaluates every AF3 seed per
+# variant, and applies iPTM + RMSD + decoy-specificity filters to build a
+# screening pool. This is the pipeline used to produce candidate sequences
+# for downstream experimental validation.
+#
+# Example target: a ligand-binding protein (3LFT SBP) designed to bind L-DOPA
+# and undergo an open->closed conformational change on binding.
+
+mode: "sample"
+
+# --- Input scaffold (closed/bound conformation) ---
+pdb: "inputs/scaffold.pdb"            # adjust to your scaffold
+chain: "A"                            # chain to redesign
+
+# --- Target ligand ---
+ligand:
+  name: "L-DOPA"
+  smiles: "N[C@@H](CC1=CC(=C(C=C1)O)O)C(=O)O"
+
+# --- Design scope (optional) ---
+# Only redesign these residues; everything else stays fixed.
+# Omit or leave empty to redesign the whole chain.
+design:
+  redesign_residues: []               # e.g. ["A10", "A11", "A16"]
+
+# --- ProteinMPNN ---
+mpnn_weights: "weights/vanilla/v_48_020.pt"
+
+# --- Sampling parameters ---
+steps: 100                            # sampling rounds (split across array tasks)
+variants: 8                           # sequences per step
+temperature: 0.3
+num_seeds: 10                         # AF3 seeds evaluated per variant
+seed: 0                               # RNG seed for reproducible sampling
+
+# --- Reference structures for conformational RMSD ---
+open_ref_pdb: "inputs/open_ref.pdb"   # apo/open conformation
+closed_ref_pdb: "inputs/scaffold.pdb" # bound/closed conformation
+design_chain_id: "A"
+
+# --- Decoy / interferent ligands (negative design) ---
+# These should NOT bind or trigger closing; used for specificity filtering.
+decoy_smiles:
+  - "N[C@@H](Cc1ccc(O)cc1)C(=O)O"      # Tyrosine
+  - "N[C@@H](Cc1c[nH]c2ccccc12)C(=O)O" # Tryptophan
+
+# Delete AF3 prediction files after extracting results (saves disk on long runs)
+cleanup_predictions: true
+
+# --- Output ---
+output_dir: "output_sampling"
+
+# --- Filtering criteria ---
+filter:
+  iptm_min: 0.8
+  open_rmsd_min: 1.5        # must deviate from open state by at least this (Å)
+  closed_rmsd_max: 3.0      # must reach closed state within this (Å)
+  local_drmsd_max: 3.5      # fold-integrity guard (Å)
+  ptm_min: 0.0
+  pae_max: 31.75
+  decoy_iptm_max: 0.9       # decoy iPTM must stay below this
+  decoy_closed_rmsd_min: 1.5
+  decoy_num_seeds: 5
+
+# --- Environment ---
+environment:
+  type: "alphafold3"
+  af3_sif: "/path/to/alphafold3.sif"
+  af3_run_dir: "/path/to/alphafold3"
+  af3_model_dir: "/path/to/alphafold3/model"
+  af3_db_dir: "/path/to/alphafold3/dataset"
+  apptainer_path: "auto"
+  template_json: "configs/ldopa_template.json"
+  run_data_pipeline: false
+  design_chain_index: 0      # chain A is sequences[0] in the template
+  reward_weights:
+    iptm: 0.55
+    ptm: 0.05
+    pae: 0.4
+    clash_penalty: 0.1

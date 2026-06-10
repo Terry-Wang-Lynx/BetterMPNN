@@ -3,6 +3,9 @@
 # This is a template. Copy and modify for your specific task.
 # All paths should be adjusted to your environment.
 
+# --- Mode ---
+mode: "train"                         # "train" (GRPO fine-tuning) or "sample" (frozen large-scale screening)
+
 # --- Input ---
 pdb: "examples/scaffold.pdb"         # Scaffold PDB (must contain target + binder chains)
 chain: "A"                            # Chain ID to redesign (the binder)
@@ -18,6 +21,7 @@ beta: 0.01                            # KL penalty coefficient
 temperature: 0.3                      # MPNN sampling temperature
 grad_clip: 1.0                        # Gradient clipping norm
 iterative: false                      # Update backbone each step (hallucination mode)
+seed: 0                               # Random seed for reproducibility (omit for nondeterministic)
 
 # --- Advantage Shaping ---
 reward_shaping_alpha: 0.7             # Power-law reward shaping exponent
@@ -41,7 +45,7 @@ environment:
   af3_run_dir: "/path/to/alphafold3"
   af3_model_dir: "/path/to/alphafold3/model"
   af3_db_dir: "/path/to/alphafold3/dataset"
-  apptainer_path: "singularity"
+  apptainer_path: "auto"              # "auto" detects apptainer/singularity on PATH
 
   # Direct mode (conda environment, no container):
   # Set af3_sif to "" and provide af3_env_script instead.
@@ -54,7 +58,10 @@ environment:
   # Skip MSA computation (use pre-computed MSA in template)
   run_data_pipeline: false
 
-  # Index of the designed chain in the JSON sequences list
+  # Index of the designed chain in the template JSON "sequences" list.
+  # MUST point to the same chain you redesign via the top-level `chain` field.
+  # In examples/scaffold.pdb the binder (chain A) is sequences[0].
+  # A length mismatch at runtime triggers a warning (likely a wrong index).
   design_chain_index: 0
 
   # Reward weights (must sum to ~1.0 before clash penalty)

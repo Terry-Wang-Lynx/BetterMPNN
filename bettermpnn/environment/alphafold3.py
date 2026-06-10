@@ -3,17 +3,47 @@
 import json
 import logging
 import os
+import shutil
 import subprocess
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List
 
 import torch
+import numpy as np
 
 from .base import Environment, EvalResult
-from ..config import EnvironmentConfig
+from ..config import EnvironmentConfig, FilterConfig
+from ..utils.structure import extract_ca_from_cif
+from ..utils.rmsd import calculate_rmsd, compute_local_drmsd
 
 logger = logging.getLogger(__name__)
 
 PAE_MAX = 31.75  # Maximum PAE value for normalization
+
+
+@dataclass
+class DecoyResult:
+    """Evaluation result for a decoy/interferent ligand."""
+    decoy_smiles: str
+    best_iptm: float = 0.0              # Best (worst-case) iPTM across seeds
+    min_closed_rmsd: float = float("inf") # Worst-case (lowest) closed_rmsd across seeds
+    causes_closing: bool = False        # True if decoy triggers conformational change
+    passed_specificity: bool = True     # True if the variant is specific against this decoy
+    structure_path: Optional[str] = None # Path to best (worst-case) decoy structure
+
+
+@dataclass
+class SeedResult:
+    """Evaluation result for a single AF3 seed."""
+    seed: int
+    metrics: dict                       # iptm, ptm, pae, has_clash, ranking_score
+    open_rmsd: Optional[float] = None   # RMSD vs open-ref PDB (if provided)
+    closed_rmsd: Optional[float] = None # RMSD vs closed-ref PDB (if provided)
+    local_drmsd: Optional[float] = None # Fold integrity check
+    structure_path: Optional[str] = None
+    passed: bool = False
+    decoy_results: List[DecoyResult] = field(default_factory=list)
+    predicted_apo_path: Optional[str] = None
 
 
 class AlphaFold3Environment(Environment):
@@ -23,19 +53,39 @@ class AlphaFold3Environment(Environment):
     from the output, and returns a weighted reward score.
     """
 
-    def __init__(self, config: EnvironmentConfig, output_dir: str = "output"):
+    def __init__(self, config: EnvironmentConfig, output_dir: str = "output",
+                 target_smiles: str = "", scaffold_name: str = "",
+                 ligand_name: str = ""):
         self.config = config
         self.output_dir = output_dir
+        self.scaffold_name = scaffold_name
+        self.ligand_name = ligand_name
         self.input_dir = os.path.join(output_dir, "af3_inputs")
         self.prediction_dir = os.path.join(output_dir, "af3_predictions")
         os.makedirs(self.input_dir, exist_ok=True)
         os.makedirs(self.prediction_dir, exist_ok=True)
 
+        # Optional reference Cα coords for conformational-change reward during
+        # training mode. Left as None unless a caller injects them; the sampler
+        # passes references explicitly as method arguments instead.
+        self.open_ref_ca: Optional["np.ndarray"] = None
+        self.closed_ref_ca: Optional["np.ndarray"] = None
+        self._chain_len_warned = False
+
         # Load template JSON
         with open(config.template_json) as f:
             self.template = json.load(f)
 
+        # Override ligand SMILES in template if provided via config
+        if target_smiles:
+            for seq_entry in self.template.get("sequences", []):
+                if "ligand" in seq_entry:
+                    seq_entry["ligand"]["smiles"] = target_smiles
+                    logger.info(f"Template ligand SMILES overridden: {target_smiles}")
+                    break
+
     def evaluate(self, sequence: str, step: int = 0, variant: int = 0) -> EvalResult:
+        """Evaluate a single sequence (original single-best interface for training mode)."""
         job_name = f"step_{step}_variant_{variant}"
 
         # 1. Create input JSON
@@ -55,25 +105,269 @@ class AlphaFold3Environment(Environment):
         if metrics is None:
             return EvalResult(score=0.0, metrics={"error": "parse_failed"})
 
-        # 4. Calculate reward
-        score = self._calculate_reward(metrics)
-
-        # 5. Find structure path (for iterative mode)
+        # 4. Find structure path (for iterative mode or RMSD calculation)
         structure_path = self._find_structure_path(output_dir)
+
+        # 5. Calculate RMSD for reward (if refs provided)
+        # This is CRITICAL for conformational-change reward during training
+        if structure_path and os.path.exists(structure_path):
+            try:
+                # We reuse the logic from evaluate_all_seeds conceptually
+                # But here we inject it into the metrics for _calculate_reward
+                from ..utils.rmsd import calculate_rmsd
+                pred_ca = extract_ca_from_cif(structure_path, "A") # Assume A for training target
+                
+                # Check for references provided via env config or trainer
+                # Note: In training mode, refs are usually set in the config
+                # but we'll try to find them if they exist
+                if hasattr(self, 'open_ref_ca') and self.open_ref_ca is not None:
+                    # If Sampler-style refs are already loaded
+                    metrics["open_rmsd"] = calculate_rmsd(pred_ca, self.open_ref_ca, align=True)
+                if hasattr(self, 'closed_ref_ca') and self.closed_ref_ca is not None:
+                    metrics["closed_rmsd"] = calculate_rmsd(pred_ca, self.closed_ref_ca, align=True)
+            except Exception as e:
+                logger.debug(f"Training RMSD calc failed: {e}")
+
+        # 6. Calculate reward
+        score = self._calculate_reward(metrics)
 
         return EvalResult(score=score, structure_path=structure_path, metrics=metrics)
 
-    def _create_input_json(self, sequence: str, job_name: str) -> str:
+    def evaluate_all_seeds(
+        self,
+        sequence: str,
+        step: int,
+        variant: int,
+        num_seeds: int,
+        open_ref_ca: Optional["np.ndarray"] = None,
+        closed_ref_ca: Optional["np.ndarray"] = None,
+        design_chain_id: str = "A",
+        filter_config: Optional[FilterConfig] = None,
+    ) -> list[SeedResult]:
+        """Evaluate a sequence across ALL AF3 seeds and return per-seed results.
+
+        This is the main method for sampling mode. It:
+        1. Creates input JSON with `num_seeds` model seeds
+        2. Runs AF3
+        3. Iterates over ALL output seed directories
+        4. Parses metrics + extracts Cα + computes RMSD for each seed
+        5. Applies filter criteria to determine pass/fail
+
+        Args:
+            sequence: Amino acid sequence string.
+            step: Current sampling step.
+            variant: Variant index within the step.
+            num_seeds: Number of AF3 model seeds.
+            open_ref_ca: Cα coordinates of open/apo reference (N, 3).
+            design_chain_id: Chain ID for Cα extraction.
+            filter_config: Filtering thresholds.
+
+        Returns:
+            List of SeedResult, one per seed found in output.
+        """
+        job_name = f"step_{step}_variant_{variant}"
+
+        # 1. Create input JSON with multiple seeds
+        json_path = self._create_input_json(sequence, job_name, num_seeds=num_seeds)
+
+        # 2. Run AF3
+        output_dir = os.path.join(self.prediction_dir, job_name)
+        os.makedirs(output_dir, exist_ok=True)
+        success = self._run_af3(json_path, output_dir, job_name)
+
+        if not success:
+            logger.warning(f"AF3 prediction failed for {job_name}")
+            return []
+
+        # 3. Find ALL seed results in output directory
+        seed_results = []
+        seed_dirs = self._find_all_seed_outputs(output_dir)
+
+        if not seed_dirs:
+            # Fallback: try to find results directly in output_dir (single-seed layout)
+            summary = self._find_summary_file(output_dir)
+            if summary:
+                seed_dirs = [(0, output_dir, summary)]
+
+        for seed_idx, seed_dir, summary_path in seed_dirs:
+            try:
+                # Parse metrics
+                metrics = self._parse_summary_file(summary_path)
+                if metrics is None:
+                    continue
+
+                # Find structure CIF
+                cif_path = self._find_structure_in_dir(seed_dir)
+
+                # Compute RMSD if reference available
+                open_rmsd = None
+                closed_rmsd = None
+                local_drmsd_val = None
+
+                if cif_path:
+                    try:
+                        pred_ca = extract_ca_from_cif(cif_path, design_chain_id)
+                        if len(pred_ca) > 0:
+                            if open_ref_ca is not None and len(open_ref_ca) > 0:
+                                open_rmsd = calculate_rmsd(pred_ca, open_ref_ca, align=True)
+                                local_drmsd_val = compute_local_drmsd(open_ref_ca, pred_ca, seq_sep=6)
+                            if closed_ref_ca is not None and len(closed_ref_ca) > 0:
+                                closed_rmsd = calculate_rmsd(pred_ca, closed_ref_ca, align=True)
+                    except Exception as e:
+                        logger.warning(f"RMSD calculation failed for seed {seed_idx}: {e}")
+
+                # Apply filter
+                passed = self._check_filter(metrics, open_rmsd, closed_rmsd, local_drmsd_val, filter_config)
+
+                sr = SeedResult(
+                    seed=seed_idx,
+                    metrics=metrics,
+                    open_rmsd=open_rmsd,
+                    closed_rmsd=closed_rmsd,
+                    local_drmsd=local_drmsd_val,
+                    structure_path=cif_path,
+                    passed=passed,
+                    decoy_results=[], # Will be populated by Sampler after decoy testing
+                )
+                seed_results.append(sr)
+
+            except Exception as e:
+                logger.warning(f"Failed to process seed {seed_idx} for {job_name}: {e}")
+
+        return seed_results
+
+    @staticmethod
+    def _check_filter(
+        metrics: dict,
+        open_rmsd: Optional[float],
+        closed_rmsd: Optional[float],
+        local_drmsd: Optional[float],
+        filter_config: Optional[FilterConfig],
+    ) -> bool:
+        """Check if a seed result passes the filter criteria."""
+        if filter_config is None:
+            return True
+
+        iptm = metrics.get("iptm", 0.0)
+        ptm = metrics.get("ptm", 0.0)
+        mean_pae = metrics.get("mean_pae", PAE_MAX)
+
+        # Hard thresholds
+        if iptm < filter_config.iptm_min:
+            logger.debug(f"Filter reject: iptm {iptm:.3f} < {filter_config.iptm_min}")
+            return False
+        if ptm < filter_config.ptm_min:
+            logger.debug(f"Filter reject: ptm {ptm:.3f} < {filter_config.ptm_min}")
+            return False
+        if mean_pae > filter_config.pae_max:
+            logger.debug(f"Filter reject: mean_pae {mean_pae:.2f} > {filter_config.pae_max}")
+            return False
+        
+        # Conformational change check
+        if open_rmsd is not None and open_rmsd < filter_config.open_rmsd_min:
+            logger.debug(f"Filter reject: open_rmsd {open_rmsd:.2f} < {filter_config.open_rmsd_min}")
+            return False
+        if closed_rmsd is not None and closed_rmsd > filter_config.closed_rmsd_max:
+            logger.debug(f"Filter reject: closed_rmsd {closed_rmsd:.2f} > {filter_config.closed_rmsd_max}")
+            return False
+        
+        # Fold integrity check
+        if local_drmsd is not None and local_drmsd > filter_config.local_drmsd_max:
+            logger.debug(f"Filter reject: local_drmsd {local_drmsd:.2f} > {filter_config.local_drmsd_max}")
+            return False
+
+        return True
+
+    def _create_input_json(self, sequence: str, job_name: str,
+                           num_seeds: Optional[int] = None) -> str:
         """Create AF3 input JSON with the designed sequence substituted in."""
         import copy
         data = copy.deepcopy(self.template)
 
+        # Set job name in JSON
+        s_name = self.scaffold_name or "protein"
+        l_name = self.ligand_name or "ligand"
+        data["name"] = f"{s_name}-{l_name}-{job_name}"
+
+        # Set model seeds
+        if num_seeds is not None and num_seeds > 0:
+            data["modelSeeds"] = list(range(1, num_seeds + 1))
+
+        idx = self.config.design_chain_index
+        sequences = data.get("sequences", [])
+        if idx >= len(sequences):
+            raise ValueError(
+                f"design_chain_index={idx} is out of range for template with "
+                f"{len(sequences)} sequence entries ({self.config.template_json}). "
+                f"Set environment.design_chain_index to the designed chain's position."
+            )
+        chain = sequences[idx].get("protein")
+        if chain is None:
+            raise ValueError(
+                f"Template sequence entry at design_chain_index={idx} has no "
+                f"'protein' block; it cannot be the designed chain. Check that "
+                f"design_chain_index points to the redesigned protein chain."
+            )
+        old_seq = chain.get("sequence", "")
+        if old_seq and len(old_seq) != len(sequence):
+            # Fixed-backbone redesign keeps the chain length identical; a
+            # mismatch almost always means design_chain_index points at the
+            # wrong chain (e.g. the target instead of the binder).
+            self._warn_once_chain_len(
+                f"Designed sequence length ({len(sequence)}) != template chain "
+                f"length at design_chain_index={idx} ({len(old_seq)}). "
+                f"Verify design_chain_index matches the chain you redesign."
+            )
+        chain["sequence"] = sequence
+        # Update MSA fields (replace the sequence line in each)
+        for msa_key in ("unpairedMsa", "pairedMsa"):
+            msa = chain.get(msa_key, "")
+            if msa:
+                lines = msa.splitlines()
+                if len(lines) >= 2:
+                    lines[1] = sequence
+                chain[msa_key] = "\n".join(lines)
+
+        job_dir = os.path.join(self.input_dir, job_name)
+        os.makedirs(job_dir, exist_ok=True)
+        json_path = os.path.join(job_dir, f"{job_name}.json")
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=2)
+        return json_path
+
+    def _warn_once_chain_len(self, msg: str) -> None:
+        """Emit the chain-length mismatch warning only once per run."""
+        if not getattr(self, "_chain_len_warned", False):
+            logger.warning(msg)
+            self._chain_len_warned = True
+
+    def _create_decoy_input_json(
+        self, sequence: str, decoy_smiles: str, job_name: str,
+        num_seeds: int = 5,
+    ) -> str:
+        """Create AF3 input JSON with a decoy ligand instead of the target.
+
+        Replaces the ligand SMILES in the template with the decoy SMILES,
+        keeping everything else (protein sequence, MSA) the same.
+        """
+        import copy
+        data = copy.deepcopy(self.template)
+
+        # Set job name in JSON
+        s_name = self.scaffold_name or "protein"
+        l_name = "decoy"
+        data["name"] = f"{s_name}-{l_name}-{job_name}"
+
+        # Set model seeds (fewer for decoy screening)
+        if num_seeds > 0:
+            data["modelSeeds"] = list(range(1, num_seeds + 1))
+
+        # Update protein sequence
         idx = self.config.design_chain_index
         sequences = data.get("sequences", [])
         if idx < len(sequences):
             chain = sequences[idx].get("protein", {})
             chain["sequence"] = sequence
-            # Update MSA fields (replace the sequence line in each)
             for msa_key in ("unpairedMsa", "pairedMsa"):
                 msa = chain.get(msa_key, "")
                 if msa:
@@ -82,12 +376,249 @@ class AlphaFold3Environment(Environment):
                         lines[1] = sequence
                     chain[msa_key] = "\n".join(lines)
 
+        # Replace ligand SMILES with decoy
+        for seq_entry in sequences:
+            if "ligand" in seq_entry:
+                seq_entry["ligand"]["smiles"] = decoy_smiles
+                break
+
+        # Update name
+        data["name"] = f"{data.get('name', 'decoy')}_decoy"
+
         job_dir = os.path.join(self.input_dir, job_name)
         os.makedirs(job_dir, exist_ok=True)
         json_path = os.path.join(job_dir, f"{job_name}.json")
         with open(json_path, "w") as f:
             json.dump(data, f, indent=2)
         return json_path
+
+    def _create_apo_input_json(
+        self, sequence: str, job_name: str, num_seeds: int = 1
+    ) -> str:
+        """Create AF3 input JSON without any ligand (Apo state)."""
+        import copy
+        data = copy.deepcopy(self.template)
+
+        s_name = self.scaffold_name or "protein"
+        data["name"] = f"{s_name}-apo-{job_name}"
+
+        if num_seeds > 0:
+            data["modelSeeds"] = list(range(1, num_seeds + 1))
+
+        idx = self.config.design_chain_index
+        sequences = data.get("sequences", [])
+        if idx < len(sequences):
+            chain = sequences[idx].get("protein", {})
+            chain["sequence"] = sequence
+            for msa_key in ("unpairedMsa", "pairedMsa"):
+                msa = chain.get(msa_key, "")
+                if msa:
+                    lines = msa.splitlines()
+                    if len(lines) >= 2:
+                        lines[1] = sequence
+                    chain[msa_key] = "\n".join(lines)
+
+        # Remove all ligand sequences
+        data["sequences"] = [seq for seq in sequences if "ligand" not in seq]
+
+        job_dir = os.path.join(self.input_dir, job_name)
+        os.makedirs(job_dir, exist_ok=True)
+        json_path = os.path.join(job_dir, f"{job_name}.json")
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=2)
+        return json_path
+
+    def evaluate_apo(
+        self,
+        sequence: str,
+        step: int,
+        variant: int,
+        num_seeds: int = 1,
+    ) -> Optional[str]:
+        """Evaluate a sequence without any ligands to get the predicted Apo state."""
+        job_name = f"step_{step}_variant_{variant}_apo"
+        json_path = self._create_apo_input_json(sequence, job_name, num_seeds=num_seeds)
+        
+        output_dir = os.path.join(self.prediction_dir, job_name)
+        os.makedirs(output_dir, exist_ok=True)
+        success = self._run_af3(json_path, output_dir, job_name)
+        
+        if not success:
+            logger.warning(f"Apo AF3 failed for {job_name}")
+            return None
+            
+        seed_dirs = self._find_all_seed_outputs(output_dir)
+        if not seed_dirs:
+            summary = self._find_summary_file(output_dir)
+            if summary:
+                seed_dirs = [(0, output_dir, summary)]
+                
+        best_ptm = 0.0
+        best_apo_cif = None
+        
+        for seed_idx, seed_dir, summary_path in seed_dirs:
+            try:
+                metrics = self._parse_summary_file(summary_path)
+                if metrics is None:
+                    continue
+                ptm = metrics.get("ptm", 0.0)
+                if ptm >= best_ptm:
+                    best_ptm = ptm
+                    best_apo_cif = self._find_structure_in_dir(seed_dir)
+            except Exception as e:
+                logger.warning(f"Apo seed {seed_idx} parse failed: {e}")
+                
+        return best_apo_cif
+
+    def evaluate_decoys(
+        self,
+        sequence: str,
+        decoy_smiles_list: List[str],
+        step: int,
+        variant: int,
+        num_seeds: int = 5,
+        open_ref_ca: Optional["np.ndarray"] = None,
+        closed_ref_ca: Optional["np.ndarray"] = None,
+        design_chain_id: str = "A",
+        filter_config: Optional[FilterConfig] = None,
+    ) -> List[DecoyResult]:
+        """Evaluate a sequence against decoy/interferent ligands.
+
+        For each decoy SMILES, runs AF3 with fewer seeds and checks:
+        1. Decoy iPTM must be low (no strong binding)
+        2. Decoy must NOT cause conformational closing
+
+        Args:
+            sequence: The designed protein sequence.
+            decoy_smiles_list: List of decoy SMILES strings.
+            step: Current step index.
+            variant: Variant index.
+            num_seeds: Seeds per decoy (fewer than target for speed).
+            open_ref_ca: Open/apo reference Cα coordinates.
+            closed_ref_ca: Closed/bound reference Cα coordinates.
+            design_chain_id: Chain ID for Cα extraction.
+            filter_config: Filter thresholds.
+
+        Returns:
+            List of DecoyResult, one per decoy.
+        """
+        decoy_results = []
+        if not decoy_smiles_list:
+            return decoy_results
+
+        fc = filter_config or FilterConfig()
+
+        for d_idx, decoy_smi in enumerate(decoy_smiles_list):
+            job_name = f"step_{step}_variant_{variant}_decoy{d_idx}"
+
+            # Create decoy input JSON
+            json_path = self._create_decoy_input_json(
+                sequence, decoy_smi, job_name, num_seeds=num_seeds
+            )
+
+            # Run AF3
+            output_dir = os.path.join(self.prediction_dir, job_name)
+            os.makedirs(output_dir, exist_ok=True)
+            success = self._run_af3(json_path, output_dir, job_name)
+
+            dr = DecoyResult(decoy_smiles=decoy_smi)
+            best_decoy_cif = None
+
+            if not success:
+                logger.warning(f"Decoy AF3 failed for {job_name}, assuming pass")
+                decoy_results.append(dr)
+                continue
+
+            # Parse all seed outputs
+            seed_dirs = self._find_all_seed_outputs(output_dir)
+            if not seed_dirs:
+                summary = self._find_summary_file(output_dir)
+                if summary:
+                    seed_dirs = [(0, output_dir, summary)]
+
+            best_iptm = 0.0
+            min_closed_rmsd = float("inf")  # worst-case (lowest) closed_rmsd for decoy
+
+            for seed_idx, seed_dir, summary_path in seed_dirs:
+                try:
+                    metrics = self._parse_summary_file(summary_path)
+                    if metrics is None:
+                        continue
+
+                    iptm = metrics.get("iptm", 0.0)
+                    if iptm > best_iptm:
+                        best_iptm = iptm
+                        best_decoy_cif = self._find_structure_in_dir(seed_dir)
+
+                    # For decoy, we care about the smallest RMSD to closed ref (does it close?)
+
+                    # Check closed_rmsd: decoy should NOT cause closing
+                    cif_path = self._find_structure_in_dir(seed_dir)
+                    if cif_path and closed_ref_ca is not None and len(closed_ref_ca) > 0:
+                        try:
+                            pred_ca = extract_ca_from_cif(cif_path, design_chain_id)
+                            if len(pred_ca) > 0:
+                                closed_rmsd = calculate_rmsd(pred_ca, closed_ref_ca, align=True)
+                                min_closed_rmsd = min(min_closed_rmsd, closed_rmsd)
+                        except Exception as e:
+                            logger.debug(f"Decoy RMSD failed for seed {seed_idx}: {e}")
+
+                except Exception as e:
+                    logger.warning(f"Decoy seed {seed_idx} parse failed: {e}")
+
+            # Check specificity criteria
+            dr.best_iptm = best_iptm
+            dr.min_closed_rmsd = min_closed_rmsd
+            dr.structure_path = best_decoy_cif
+
+            # Evaluate specificity
+            dr.causes_closing = (min_closed_rmsd <= fc.decoy_closed_rmsd_min)
+            dr.passed_specificity = (
+                best_iptm <= fc.decoy_iptm_max and not dr.causes_closing
+            )
+
+            logger.info(
+                f"    Decoy {d_idx} ({decoy_smi[:30]}): "
+                f"iptm={best_iptm:.3f} closed_rmsd={min_closed_rmsd:.2f} "
+                f"{'✓ SPECIFIC' if dr.passed_specificity else '✗ FAIL'}"
+            )
+
+            decoy_results.append(dr)
+
+        return decoy_results
+
+    @staticmethod
+    def _resolve_container_runtime(configured: str) -> str:
+        """Resolve the container runtime binary.
+
+        "auto" (or empty) detects apptainer/singularity on PATH, preferring
+        apptainer. An explicit value is used as-is (falling back to PATH lookup
+        if it is a bare name that is not directly executable).
+        """
+        if configured and configured not in ("auto", "singularity", "apptainer"):
+            return configured
+        if configured in ("singularity", "apptainer"):
+            found = shutil.which(configured)
+            if found:
+                return found
+        for candidate in ("apptainer", "singularity"):
+            found = shutil.which(candidate)
+            if found:
+                return found
+        # Last resort: return whatever was configured (or a sensible default)
+        return configured if configured not in ("", "auto") else "apptainer"
+
+    def cleanup_prediction_dir(self, prediction_dir: str) -> None:
+        """Delete AF3 prediction directory to save disk space.
+
+        Called after all results have been extracted and logged.
+        """
+        try:
+            if os.path.isdir(prediction_dir):
+                shutil.rmtree(prediction_dir)
+                logger.debug(f"Cleaned up: {prediction_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup {prediction_dir}: {e}")
 
     def _run_af3(self, json_path: str, output_dir: str, job_name: str) -> bool:
         """Run AlphaFold 3 via Singularity/Apptainer or direct Python."""
@@ -99,8 +630,9 @@ class AlphaFold3Environment(Environment):
 
         if cfg.af3_sif:
             # Container mode: run via Singularity/Apptainer
+            runtime = self._resolve_container_runtime(cfg.apptainer_path)
             cmd = [
-                cfg.apptainer_path, "exec", "--nv",
+                runtime, "exec", "--nv",
                 "-B", f"{os.path.dirname(json_path)}:/input",
                 "-B", f"{cfg.af3_run_dir}:/af3_run",
                 "-B", f"{cfg.af3_model_dir}:/model",
@@ -146,12 +678,46 @@ class AlphaFold3Environment(Environment):
             logger.error(f"AF3 error: {e}")
             return False
 
+    def _find_all_seed_outputs(self, output_dir: str) -> list[tuple[int, str, str]]:
+        """Find all seed output directories and their summary files.
+
+        AF3 output structure is typically:
+          output_dir/<job_name>/seed-<N>_sample-0/
+            *_summary_confidences.json
+            *_model.cif
+
+        Returns:
+            List of (seed_index, seed_dir_path, summary_file_path)
+        """
+        results = []
+        for root, dirs, files in os.walk(output_dir):
+            for f in files:
+                if f.endswith("_summary_confidences.json"):
+                    summary_path = os.path.join(root, f)
+                    # Extract seed index from directory name
+                    dir_name = os.path.basename(root)
+                    seed_idx = 0
+                    if "seed-" in dir_name:
+                        try:
+                            seed_part = dir_name.split("seed-")[1].split("_")[0]
+                            seed_idx = int(seed_part)
+                        except (IndexError, ValueError):
+                            pass
+                    results.append((seed_idx, root, summary_path))
+
+        results.sort(key=lambda x: x[0])
+        return results
+
     def _parse_results(self, output_dir: str) -> Optional[dict]:
-        """Find and parse summary_confidences.json from AF3 output."""
+        """Find and parse summary_confidences.json from AF3 output (legacy)."""
         summary_path = self._find_summary_file(output_dir)
         if not summary_path:
             logger.warning(f"No summary_confidences.json found in {output_dir}")
             return None
+        return self._parse_summary_file(summary_path)
+
+    def _parse_summary_file(self, summary_path: str) -> Optional[dict]:
+        """Parse a single summary_confidences.json file."""
         try:
             with open(summary_path) as f:
                 data = json.load(f)
@@ -188,6 +754,18 @@ class AlphaFold3Environment(Environment):
             + w.pae * pae_reward
             + w.clash_penalty * clash_penalty
         )
+
+        # Optional RMSD rewards for fine-tuning conformational change
+        if metrics.get("open_rmsd") is not None and w.open_rmsd != 0:
+            # Reward higher RMSD vs open ref (deviating from apo)
+            # Max expected RMSD is around 10A, normalize or cap? 
+            # Let's use raw Å with a weight or a tanh-like scale.
+            reward += w.open_rmsd * min(metrics["open_rmsd"], 10.0) / 10.0
+        
+        if metrics.get("closed_rmsd") is not None and w.closed_rmsd != 0:
+            # Reward lower RMSD vs closed ref (reaching holo)
+            reward += w.closed_rmsd * (1.0 - min(metrics["closed_rmsd"], 10.0) / 10.0)
+
         return max(0.0, min(1.0, reward))
 
     @staticmethod
@@ -206,4 +784,16 @@ class AlphaFold3Environment(Environment):
             for f in files:
                 if f.endswith(".cif") and "sample" in f:
                     return os.path.join(root, f)
+        return None
+
+    @staticmethod
+    def _find_structure_in_dir(directory: str) -> Optional[str]:
+        """Find a CIF model file in a specific directory."""
+        for f in os.listdir(directory):
+            if f.endswith(".cif") and ("model" in f or "sample" in f):
+                return os.path.join(directory, f)
+        # Fallback: any CIF file
+        for f in os.listdir(directory):
+            if f.endswith(".cif"):
+                return os.path.join(directory, f)
         return None

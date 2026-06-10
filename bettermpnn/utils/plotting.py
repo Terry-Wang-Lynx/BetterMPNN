@@ -13,7 +13,11 @@ def plot_training_curves(results: list[dict], output_dir: str) -> None:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        logger.debug("matplotlib not available, skipping plot")
+        logger.warning("matplotlib not available in this environment. Training curves will NOT be generated.")
+        logger.info("To enable plotting, please install matplotlib: pip install matplotlib")
+        return
+    except Exception as e:
+        logger.error(f"Failed to initialize matplotlib: {e}")
         return
 
     if len(results) < 1:

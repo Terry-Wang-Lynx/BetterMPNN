@@ -2,9 +2,26 @@
 
 import argparse
 import logging
-import sys
+import os
+import random
 
 from .config import Config
+
+logger = logging.getLogger(__name__)
+
+
+def set_seed(seed: int) -> None:
+    """Seed Python, NumPy, and torch RNGs for reproducible runs."""
+    import numpy as np
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    logger.info(f"Random seed set to {seed}")
 
 
 def main():
@@ -18,6 +35,9 @@ def main():
     parser.add_argument("--variants", type=int, help="Override variants per step")
     parser.add_argument("--iterative", action="store_true", help="Enable iterative backbone update")
     parser.add_argument("--output", help="Override output directory")
+    parser.add_argument("--mode", choices=["train", "sample"], help="Override mode (train/sample)")
+    parser.add_argument("--step-range", help="Step range for parallel jobs, e.g. '0-4' (0-indexed, inclusive)")
+    parser.add_argument("--seed", type=int, help="Override random seed")
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
 
     args = parser.parse_args()
@@ -36,31 +56,63 @@ def main():
         config.pdb = args.pdb
     if args.chain:
         config.chain = args.chain
-    if args.steps:
+    if args.steps is not None:
         config.steps = args.steps
-    if args.variants:
+    if args.variants is not None:
         config.variants = args.variants
     if args.iterative:
         config.iterative = True
     if args.output:
         config.output_dir = args.output
+    if args.mode:
+        config.mode = args.mode
+    if args.seed is not None:
+        config.seed = args.seed
 
     # Validate
     if not config.pdb:
         parser.error("PDB path is required (via --pdb or config file)")
 
+    # Reproducibility
+    if config.seed is not None:
+        set_seed(config.seed)
+
     # Build components
+    import torch
+
     from .mpnn import MPNNModel
     from .environment.alphafold3 import AlphaFold3Environment
-    from .rl.trainer import Trainer
 
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-    logging.getLogger(__name__).info(f"Device: {device}")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Device: {device}")
 
     mpnn = MPNNModel.load(config.mpnn_weights, device=device)
-    env = AlphaFold3Environment(config.environment, output_dir=config.output_dir)
-    trainer = Trainer(mpnn, env, config)
-    trainer.train()
+    env = AlphaFold3Environment(
+        config.environment,
+        output_dir=config.output_dir,
+        target_smiles=config.effective_target_smiles,
+        scaffold_name=config.scaffold.name,
+        ligand_name=config.ligand.name,
+    )
+
+    if config.mode == "sample":
+        # Sampling mode: frozen MPNN + multi-seed AF3 + filtering
+        from .rl.sampler import Sampler
+
+        # Parse step range for parallel job array support
+        step_range = None
+        if args.step_range:
+            parts = args.step_range.split("-")
+            step_range = (int(parts[0]), int(parts[1]))
+            logger.info(f"Parallel mode: processing steps {step_range[0]}-{step_range[1]}")
+
+        sampler = Sampler(mpnn, env, config)
+        sampler.run(step_range=step_range)
+    else:
+        # Training mode: original GRPO loop
+        from .rl.trainer import Trainer
+        trainer = Trainer(mpnn, env, config)
+        trainer.train()
 
 
 if __name__ == "__main__":

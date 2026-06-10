@@ -81,16 +81,26 @@ class MPNNModel:
         chain: str,
         n: int,
         temperature: float = 0.3,
+        design_positions: list[int] = None,
     ) -> SampleResult:
-        """Sample n sequence variants for the specified chain."""
+        """Sample n sequence variants for the specified chain.
+        If design_positions is provided (1-based indices), only those positions will be designed.
+        """
         pdb_dict_list = parse_PDB(pdb_path, ca_only=False)
         chain_id_dict = {pdb_dict_list[0]["name"]: ([chain], [])}
         dataset = StructureDatasetPDB(pdb_dict_list, truncate=None, max_length=200000)
         batch_clones = [copy.deepcopy(dataset[0]) for _ in range(n)]
 
+        fixed_position_dict = None
+        if design_positions:
+            seq_len = len(pdb_dict_list[0].get(f"seq_chain_{chain}", ""))
+            fixed_pos = [i for i in range(1, seq_len + 1) if i not in design_positions]
+            fixed_position_dict = {pdb_dict_list[0]["name"]: {chain: fixed_pos}}
+            logger.info(f"Designing {len(design_positions)} residues out of {seq_len} in chain {chain}")
+
         feats = tied_featurize(
             batch_clones, self.device, chain_id_dict,
-            None, None, None, None, None,
+            fixed_position_dict=fixed_position_dict,
         )
         (X, S, mask, lengths, chain_M, chain_encoding_all,
          chain_list_list, visible_list_list, masked_list_list,

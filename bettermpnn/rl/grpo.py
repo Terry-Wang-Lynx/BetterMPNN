@@ -1,6 +1,7 @@
 """GRPO (Group Relative Policy Optimization) — pure RL math, no protein concepts."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 
@@ -14,7 +15,7 @@ class GRPOResult:
 
 def compute_advantages(
     rewards: torch.Tensor,
-    shaping_alpha: float = None,
+    shaping_alpha: Optional[float] = None,
     scale_factor: float = 5.0,
 ) -> torch.Tensor:
     """Compute group-relative advantages from a batch of rewards.

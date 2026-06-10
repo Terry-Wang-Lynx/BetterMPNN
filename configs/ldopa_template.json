@@ -1,0 +1,24 @@
+{
+  "name": "3LFT-L-DOPA",
+  "modelSeeds": [1, 2],
+  "sequences": [
+    {
+      "protein": {
+        "id": ["A"],
+        "sequence": "SNAKIGVLQFVSHPSLDLIYKGIQDGLAEEGYKDDQVKIDFMNSEGDQSKVATMSKQLVANGNDLVVGIATPAAQGLASATKDLPVIMAAITDPIGANLVKDLKKPGGNVTGVSDHNPAQQQVELIKALTPNVKTIGALYSSSEDNSKTQVEEFKAYAEKAGLTVETFAVPSTNEIASTVTVMTSKVDAIWVPIDNTIASGFPTVVSSNQSSKKPIYPSATAMVEVGGLASVVIDQHDLGVATGKMIVQVLKGAKPADTPVNVFSTGKSVINKKIAQELGITIPESVLKEAGQVI",
+        "unpairedMsa": "",
+        "pairedMsa": "",
+        "modifications": [],
+        "templates": []
+      }
+    },
+    {
+      "ligand": {
+        "id": ["B"],
+        "smiles": "N[C@@H](CC1=CC(=C(C=C1)O)O)C(=O)O"
+      }
+    }
+  ],
+  "dialect": "alphafold3",
+  "version": 1
+}
