@@ -73,10 +73,6 @@ cd weights/vanilla/
 wget https://files.ipd.uw.edu/pub/training_sets/ProteinMPNN/v_48_020.pt
 ```
 
-> **iterative mode** (`iterative: true`) converts predicted CIF backbones to PDB and requires `biotite` (installed by `requirements.txt`). The default non-iterative train/sample paths do not need it.
-
-> **Offline / air-gapped HPC.** Compute nodes often have no internet, so `git clone` / `wget` will fail there. Instead, clone the repo and download the weights on a connected machine, then transfer them in — e.g. `rsync -av BetterMPNN/ user@cluster:~/BetterMPNN/` (or `scp`). On the cluster, activate your env with `eval "$(conda shell.bash hook)" && conda activate bettermpnn` — `module load <conda>` alone does not enable `conda activate`.
-
 **Run**
 
 ```bash
@@ -179,7 +175,7 @@ class MyPredictor(Environment):
 Run the unit tests (GRPO math, config loading, RMSD — no GPU needed):
 
 ```bash
-pip install -r requirements.txt pytest
+pip install -e ".[dev]"
 pytest -q
 ```
 

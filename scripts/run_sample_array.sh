@@ -18,11 +18,8 @@
 
 set -euo pipefail
 
-# --- Environment setup (edit for your cluster) ---
-#   module load cuda/12.8 cudnn apptainer/1.2.4 miniforge3
-# `module load <conda>` does NOT enable `conda activate` in a non-interactive
-# shell; source the hook first (use the full conda path if it is not on PATH):
-#   eval "$(conda shell.bash hook)"
+# Activate your environment here (edit for your cluster), e.g.:
+#   module load cuda cudnn apptainer
 #   conda activate bettermpnn
 
 export PYTHONUNBUFFERED=1
