@@ -49,22 +49,25 @@ import json, glob, os
 
 output_dir = '${OUTPUT_DIR}'
 summaries = sorted(glob.glob(os.path.join(output_dir, 'screening_summary_step*.json')))
-total_seeds = 0
-total_passed = 0
 
+# These per-worker counts are additive because workers process disjoint step ranges.
+sum_fields = [
+    'total_seeds_evaluated', 'passed_seeds', 'passed_unique_variants',
+    'decoy_tested', 'passed_with_specificity', 'specific_unique_variants',
+]
+totals = {k: 0 for k in sum_fields}
 for s in summaries:
     with open(s) as f:
         d = json.load(f)
-    total_seeds += d.get('total_seeds_evaluated', 0)
-    total_passed += d.get('passed_seeds', 0)
+    for k in sum_fields:
+        totals[k] += d.get(k, 0)
 
-# Load any summary for template
 if summaries:
     with open(summaries[0]) as f:
-        merged = json.load(f)
-    merged['total_seeds_evaluated'] = total_seeds
-    merged['passed_seeds'] = total_passed
-    merged['pass_rate'] = f'{100*total_passed/max(1,total_seeds):.2f}%'
+        merged = json.load(f)          # template (filter config, references, ...)
+    merged.update(totals)
+    ts = totals['total_seeds_evaluated']
+    merged['pass_rate'] = f'{100*totals[\"passed_seeds\"]/max(1, ts):.2f}%'
     merged['num_workers'] = len(summaries)
 
     out = os.path.join(output_dir, 'screening_summary.json')

@@ -12,7 +12,7 @@ license = { text = "MIT" }
 dependencies = [
     "torch>=2.0.0",
     "numpy>=1.23",
-    "biotite>=0.39",
+    "biotite>=1.0",
     "matplotlib>=3.5",
     "pyyaml>=6.0",
 ]

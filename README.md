@@ -1,6 +1,6 @@
 <h1 align="center">BetterMPNN</h1>
 
-BetterMPNN is a reinforcement learning driven framework for protein sequence deep optimization. We use **Group Relative Policy Optimization (GRPO)** to fine-tune ProteinMPNN in specific tasks, enabling efficient protein sequence design through an exploration-evaluation-optimization loop. With a pluggable structure prediction environment as the reward signal, the framework can complete the design process from backbone to high-performance binding proteins within hours.
+BetterMPNN is a reinforcement learning driven framework for protein sequence deep optimization. We use **Group Relative Policy Optimization (GRPO)** to fine-tune ProteinMPNN in specific tasks, enabling efficient protein sequence design through an exploration-evaluation-optimization loop. With a pluggable structure prediction environment as the reward signal, the framework can take a target from backbone to high-performance binders in hours when sampling is parallelized across GPUs on a cluster (single-GPU runs are correspondingly slower).
 
 ## Design
 
@@ -78,6 +78,8 @@ wget -P weights/vanilla \
 python -m bettermpnn.cli --config configs/example.yaml
 ```
 
+After `pip install`, the equivalent console entry point `bettermpnn --config ...` is also available.
+
 Override from CLI:
 
 ```bash
@@ -122,14 +124,15 @@ The "Default" column below shows the values used in `configs/example.yaml`; the 
 | `beta` | `0.01` | KL penalty weight (train mode) |
 | `temperature` | `0.3` | Sampling temperature |
 | `iterative` | `false` | Update backbone each step |
-| `seed` | none | Random seed for reproducibility |
+| `seed` | `0`* | Random seed for reproducibility (*example configs set `0`; the dataclass default is `None` = nondeterministic) |
+| `design_chain_id` | `"A"` | Chain ID used for Cα/RMSD extraction (must match `chain`) |
 | `num_seeds` | `5` | AF3 seeds per variant (sample mode) |
 | `design.redesign_residues` | `[]` | Restrict design to these residues, e.g. `["A10","A11"]` (empty = whole chain) |
 | `ligand.smiles` | none | Target small-molecule SMILES |
 | `decoy_smiles` | `[]` | Interferent SMILES for specificity filtering (sample mode) |
 | `open_ref_pdb` / `closed_ref_pdb` | none | Reference structures for conformational RMSD |
 
-> `environment.design_chain_index` must point to the same chain (by position in the template JSON `sequences` list) that you redesign via `chain`; a length mismatch is flagged at runtime.
+> Three settings select the same chain and must agree: `chain` (the chain ProteinMPNN redesigns), `environment.design_chain_index` (its position in the template JSON `sequences` list), and `design_chain_id` (the chain used for Cα/RMSD extraction). A sequence-length mismatch against the template is flagged at runtime, and a misconfigured RMSD reference (no Cα extracted for `design_chain_id`) fails fast.
 
 **Output**
 

@@ -73,6 +73,39 @@ def test_calculate_reward_clamped_and_weighted(tmp_path):
     assert 0.0 <= clashed <= clean <= 1.0
 
 
+def test_parse_summary_requires_core_fields(tmp_path):
+    env = _make_env(tmp_path, design_chain_index=0)
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"iptm": 0.7, "ptm": 0.8, "chain_pair_pae_min": [[0, 5], [5, 0]]}))
+    bad = tmp_path / "bad.json"  # missing iptm/ptm -> parse failure, not a fake low score
+    bad.write_text(json.dumps({"ranking_score": 0.1}))
+    parsed = env._parse_summary_file(str(good))
+    assert parsed is not None and parsed["iptm"] == 0.7 and parsed["ptm"] == 0.8
+    assert env._parse_summary_file(str(bad)) is None
+
+
+def test_multi_record_designed_msa_rejected(tmp_path):
+    import pathlib
+    tp = pathlib.Path(tmp_path)
+    tp.mkdir(parents=True, exist_ok=True)
+    template = {
+        "name": "t", "modelSeeds": [1],
+        "sequences": [
+            {"protein": {"id": ["A"], "sequence": "AAAA",
+                         "unpairedMsa": ">A\nAAAA\n>hom1\nAAAC", "pairedMsa": ">A\nAAAA"}},
+        ],
+    }
+    tpl = tp / "template.json"
+    tpl.write_text(json.dumps(template))
+    cfg = EnvironmentConfig(template_json=str(tpl), design_chain_index=0)
+    env = AlphaFold3Environment(cfg, output_dir=str(tp / "out"))
+    try:
+        env._create_input_json("AAAA", "job")
+        assert False, "expected ValueError for multi-record designed-chain MSA"
+    except ValueError:
+        pass
+
+
 def test_design_chain_index_out_of_range_raises(tmp_path):
     env = _make_env(tmp_path, design_chain_index=5)
     try:
