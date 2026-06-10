@@ -56,17 +56,23 @@ def test_grpo_loss_shapes_and_kl_nonneg():
 
 
 def test_grpo_loss_respects_mask():
+    # Construct per-token KL that differs between the first and second half of
+    # each sequence, so masking out one half must change the loss.
     batch, seq = 2, 6
-    current = torch.zeros(batch, seq).requires_grad_(True)
     ref = torch.zeros(batch, seq)
+    current = torch.zeros(batch, seq)
+    current[:, 3:] = 0.5  # nonzero ref-cur only in the second half -> KL there
+    current = current.requires_grad_(True)
     adv = torch.tensor([1.0, -1.0])
-    full = torch.ones(batch, seq)
-    half = torch.zeros(batch, seq)
-    half[:, :3] = 1.0
 
-    loss_full = compute_grpo_loss(current, ref, adv, full, beta=0.01).loss
-    loss_half = compute_grpo_loss(current, ref, adv, half, beta=0.01).loss
-    # With zero KL (current == ref) the per-token policy loss is constant,
-    # so a masked mean over fewer tokens yields the same value.
-    assert torch.isfinite(loss_full)
-    assert torch.isfinite(loss_half)
+    full = torch.ones(batch, seq)
+    first_half = torch.zeros(batch, seq)
+    first_half[:, :3] = 1.0  # masks out the KL-bearing tokens
+
+    out_full = compute_grpo_loss(current, ref, adv, full, beta=0.5)
+    out_first = compute_grpo_loss(current, ref, adv, first_half, beta=0.5)
+    # The masked-out KL must move the loss; equality would mean the mask is ignored.
+    assert not torch.isclose(out_full.loss, out_first.loss)
+    # Masking only KL-free tokens leaves zero KL contribution.
+    assert abs(out_first.kl.item()) < 1e-6
+    assert out_full.kl.item() > 0

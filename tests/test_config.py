@@ -65,6 +65,19 @@ def test_nested_environment_and_filter(tmp_path):
     assert cfg.environment.reward_weights.iptm == 0.6
 
 
+def test_filter_legacy_keys_are_remapped(tmp_path):
+    path = _write(tmp_path, """
+        pdb: "x.pdb"
+        filter:
+          conf_rmsd_min: 1.5
+          decoy_conf_rmsd_max: 2.0
+    """)
+    cfg = Config.from_yaml(path)
+    # Legacy keys map onto the current field names.
+    assert cfg.filter.open_rmsd_min == 1.5
+    assert cfg.filter.decoy_closed_rmsd_min == 2.0
+
+
 def test_effective_target_smiles_prefers_ligand(tmp_path):
     path = _write(tmp_path, """
         pdb: "x.pdb"
