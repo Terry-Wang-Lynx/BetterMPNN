@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -316,20 +317,20 @@ class AlphaFold3Environment(Environment):
                 f"Verify design_chain_index matches the chain you redesign."
             )
         chain["sequence"] = sequence
-        # Update the MSA. The designed chain is expected to use a single-sequence
-        # MSA (a ">name\nSEQUENCE" block); we replace that query line. A
-        # multi-record MSA on the designed chain cannot be updated this way, so
-        # warn rather than silently corrupting alignment columns.
+        # Update the MSA. The designed chain must use a single-sequence MSA (a
+        # ">name\nSEQUENCE" block) because its sequence changes every step: we
+        # replace that query line. A multi-record MSA cannot be updated this way
+        # without silently corrupting alignment columns, so reject it outright.
         for msa_key in ("unpairedMsa", "pairedMsa"):
             msa = chain.get(msa_key, "")
             if msa:
                 lines = msa.splitlines()
                 if sum(1 for ln in lines if ln.startswith(">")) > 1:
-                    self._warn_once_chain_len(
-                        f"Designed chain {msa_key} has multiple MSA records; "
-                        f"only single-sequence MSA is supported for the redesigned "
-                        f"chain. The query line will be replaced but other records "
-                        f"are left stale — provide a single-sequence MSA instead."
+                    raise ValueError(
+                        f"Designed chain (design_chain_index={idx}) has a "
+                        f"multi-record {msa_key}; only a single-sequence MSA is "
+                        f"supported for the redesigned chain. Provide a two-line "
+                        f"'>name\\nSEQUENCE' block instead."
                     )
                 if len(lines) >= 2:
                     lines[1] = sequence
@@ -660,23 +661,24 @@ class AlphaFold3Environment(Environment):
                 f"--run_data_pipeline={'true' if cfg.run_data_pipeline else 'false'}",
             ]
         else:
-            # Direct mode: run AF3 as a subprocess with env_script
+            # Direct mode: run AF3 as a subprocess with env_script. Paths are
+            # shell-quoted so spaces/metacharacters can't break the command.
             run_script = os.path.join(cfg.af3_run_dir, "run_alphafold.py")
             shell_cmd = ""
             if cfg.af3_env_script:
-                shell_cmd += f"source {cfg.af3_env_script} && "
+                shell_cmd += f"source {shlex.quote(cfg.af3_env_script)} && "
             shell_cmd += (
-                f"python {run_script}"
-                f" --json_path={json_path}"
-                f" --model_dir={cfg.af3_model_dir}"
-                f" --output_dir={os.path.abspath(output_dir)}"
+                f"python {shlex.quote(run_script)}"
+                f" --json_path={shlex.quote(json_path)}"
+                f" --model_dir={shlex.quote(cfg.af3_model_dir)}"
+                f" --output_dir={shlex.quote(os.path.abspath(output_dir))}"
                 f" --run_data_pipeline={'true' if cfg.run_data_pipeline else 'false'}"
                 f" --run_inference=true"
             )
             # The data pipeline needs the genetic databases; container mode always
             # binds them, so mirror that here when the pipeline is enabled.
             if cfg.run_data_pipeline and cfg.af3_db_dir:
-                shell_cmd += f" --db_dir={cfg.af3_db_dir}"
+                shell_cmd += f" --db_dir={shlex.quote(cfg.af3_db_dir)}"
             cmd = ["bash", "-c", shell_cmd]
 
         logger.info(f"Running AF3 for {job_name}...")
@@ -734,13 +736,27 @@ class AlphaFold3Environment(Environment):
         return self._parse_summary_file(summary_path)
 
     def _parse_summary_file(self, summary_path: str) -> Optional[dict]:
-        """Parse a single summary_confidences.json file."""
+        """Parse a single summary_confidences.json file.
+
+        The interface-confidence metrics (``iptm``, ``ptm``) are required: if the
+        file is missing them the schema/layout is wrong, and we return None
+        (a parse failure) rather than silently substituting a low score that
+        would look like a genuinely bad prediction. ``has_clash`` /
+        ``ranking_score`` are treated as optional with conservative defaults.
+        """
         try:
             with open(summary_path) as f:
                 data = json.load(f)
+            missing = [k for k in ("iptm", "ptm") if k not in data]
+            if missing:
+                logger.error(
+                    f"AF3 summary {summary_path} is missing required field(s) "
+                    f"{missing}; treating as a parse failure."
+                )
+                return None
             return {
-                "iptm": float(data.get("iptm", 0.0)),
-                "ptm": float(data.get("ptm", 0.0)),
+                "iptm": float(data["iptm"]),
+                "ptm": float(data["ptm"]),
                 "has_clash": float(data.get("has_clash", 1.0)),
                 "ranking_score": float(data.get("ranking_score", 0.0)),
                 "mean_pae": self._extract_mean_pae(data),
@@ -799,6 +815,12 @@ class AlphaFold3Environment(Environment):
             # Reward lower RMSD vs closed ref (reaching holo)
             reward += w.closed_rmsd * (1.0 - min(metrics["closed_rmsd"], 10.0) / 10.0)
 
+        # Clamp to [0, 1] for a stable, comparable reward scale. Note: if many
+        # variants in a group saturate at 1.0, the group std collapses and GRPO
+        # advantages vanish for that step (no gradient). With the default
+        # weights this is rare in practice (the PAE term keeps designs below the
+        # ceiling), but raise the ceiling or rescale the weights if you observe
+        # advantages flat-lining late in training.
         return max(0.0, min(1.0, reward))
 
     @staticmethod
@@ -812,10 +834,15 @@ class AlphaFold3Environment(Environment):
 
     @staticmethod
     def _find_structure_path(directory: str) -> Optional[str]:
-        """Find the best predicted structure CIF file."""
+        """Find a predicted structure CIF file.
+
+        AF3 writes a top-level ``*_model.cif`` (the ranked best) plus per-seed
+        ``*_sample-*.cif`` files, so match either ``model`` or ``sample`` —
+        matching only ``sample`` would miss the ranked model file.
+        """
         for root, _, files in os.walk(directory):
             for f in files:
-                if f.endswith(".cif") and "sample" in f:
+                if f.endswith(".cif") and ("model" in f or "sample" in f):
                     return os.path.join(root, f)
         return None
 

@@ -9,12 +9,20 @@ logger = logging.getLogger(__name__)
 
 
 def cif_to_pdb(cif_path: str, pdb_path: str) -> None:
-    """Convert a CIF file to PDB format using biotite."""
+    """Convert a CIF file to PDB format using biotite.
+
+    Supports both the current biotite API (``CIFFile``, biotite >= 1.0) and the
+    legacy ``PDBxFile`` API (biotite < 1.0).
+    """
     import biotite.structure.io.pdbx as pdbx
     import biotite.structure.io.pdb as pdb_io
 
-    f = pdbx.PDBxFile.read(cif_path)
-    structure = pdbx.get_structure(f, model=1)
+    if hasattr(pdbx, "CIFFile"):
+        cif = pdbx.CIFFile.read(cif_path)
+        structure = pdbx.get_structure(cif, model=1)
+    else:  # legacy biotite (< 1.0)
+        f = pdbx.PDBxFile.read(cif_path)
+        structure = pdbx.get_structure(f, model=1)
 
     f_pdb = pdb_io.PDBFile()
     f_pdb.set_structure(structure)

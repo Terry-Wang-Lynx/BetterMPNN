@@ -72,6 +72,11 @@ def main():
     # Validate
     if not config.pdb:
         parser.error("PDB path is required (via --pdb or config file)")
+    if config.steps < 1:
+        parser.error(f"steps must be >= 1 (got {config.steps})")
+    # GRPO needs at least two variants per step to form a group baseline.
+    if config.mode == "train" and config.variants < 2:
+        parser.error(f"train mode needs variants >= 2 to compute group-relative advantages (got {config.variants})")
 
     # Reproducibility
     if config.seed is not None:

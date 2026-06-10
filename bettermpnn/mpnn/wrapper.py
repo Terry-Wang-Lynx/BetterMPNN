@@ -74,7 +74,12 @@ class MPNNModel:
         )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
-        model.train()
+        # Use eval() (dropout off) even for the trainable policy: parameters stay
+        # differentiable, but sampling and log-prob evaluation become deterministic
+        # given the inputs. This keeps the GRPO importance ratio exp(cur-cur.detach())
+        # at 1 and the step-0 KL at 0, instead of injecting dropout-mask noise that
+        # would bias the policy gradient and the KL against the eval-mode reference.
+        model.eval()
         logger.info(f"Loaded ProteinMPNN from {weights_path} (k={num_edges})")
         return cls(model, device, num_edges)
 
@@ -120,12 +125,17 @@ class MPNNModel:
          pssm_coef, pssm_bias, pssm_log_odds_all,
          bias_by_res_all, tied_beta) = feats
 
+        # Omit 'X' (index 20 in the ProteinMPNN alphabet) so we never emit an
+        # unknown residue that a downstream structure predictor would reject.
+        omit_AAs_np = np.zeros(21)
+        omit_AAs_np[20] = 1.0
+
         with torch.no_grad():
             randn = torch.randn(chain_M.shape, device=X.device)
             sample_dict = self.model.sample(
                 X, randn, S, chain_M, chain_encoding_all, residue_idx,
                 mask=mask, temperature=temperature, chain_M_pos=chain_M_pos,
-                omit_AAs_np=np.zeros(21), bias_AAs_np=np.zeros(21),
+                omit_AAs_np=omit_AAs_np, bias_AAs_np=np.zeros(21),
                 omit_AA_mask=omit_AA_mask, pssm_coef=pssm_coef,
                 pssm_bias=pssm_bias, bias_by_res=bias_by_res_all,
             )

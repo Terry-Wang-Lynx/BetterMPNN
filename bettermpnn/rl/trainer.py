@@ -55,14 +55,17 @@ class Trainer:
             ("closed_ref_ca", cfg.closed_ref_pdb, "closed"),
         ):
             if path and os.path.exists(path):
-                try:
-                    ca = extract_ca_from_pdb(path, cfg.design_chain_id)
-                    setattr(self.env, attr, ca)
-                    logger.info(f"Loaded {name} reference ({len(ca)} Cα) from {path}")
-                except Exception as e:
-                    logger.warning(f"Failed to load {name} reference {path}: {e}")
+                ca = extract_ca_from_pdb(path, cfg.design_chain_id)
+                if len(ca) == 0:
+                    # Fail fast: a provided ref with no Cα means the chain id is wrong.
+                    raise ValueError(
+                        f"{name}_ref_pdb={path} yielded no Cα atoms for chain "
+                        f"'{cfg.design_chain_id}'. Check the path and design_chain_id."
+                    )
+                setattr(self.env, attr, ca)
+                logger.info(f"Loaded {name} reference ({len(ca)} Cα) from {path}")
             elif path:
-                logger.warning(f"{name} reference PDB not found: {path}")
+                raise ValueError(f"{name} reference PDB not found: {path}")
 
     def _init_csv_log(self):
         """Initialize the per-variant CSV log file."""
@@ -148,6 +151,12 @@ class Trainer:
     def _train_step(self, step: int) -> dict:
         """Execute one training step: sample -> evaluate -> update."""
         cfg = self.config
+
+        # Reseed per global step so each step's sampling is distinct and
+        # reproducible (and so parallel sampling workers on disjoint step
+        # ranges never draw identical batches).
+        if cfg.seed is not None:
+            torch.manual_seed(cfg.seed + step)
 
         # --- Sample sequences ---
         design_positions = cfg.design.get_redesign_positions(cfg.chain)
