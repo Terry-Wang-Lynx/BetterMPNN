@@ -2,12 +2,12 @@
 # ========================================================
 # Merge per-step screening logs into a single CSV
 # Run this after all array tasks complete:
-#   bash merge_results.sh output_sampling_3lft
+#   bash merge_results.sh output_sampling
 # ========================================================
 
 set -euo pipefail
 
-OUTPUT_DIR=${1:-output_sampling_3lft}
+OUTPUT_DIR=${1:-output_sampling}
 
 echo "=== Merging screening results from ${OUTPUT_DIR} ==="
 
