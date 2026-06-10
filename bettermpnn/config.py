@@ -101,8 +101,10 @@ class EnvironmentConfig:
     # MSA handling
     run_data_pipeline: bool = False  # False = use pre-computed MSA
 
-    # Index of the designed chain in the JSON sequences list
-    design_chain_index: int = 1
+    # Index of the designed chain in the template JSON "sequences" list.
+    # Default 0 matches the shipped example (binder = chain A = sequences[0])
+    # and must point to the same chain as Config.chain.
+    design_chain_index: int = 0
 
     # Reward weights
     reward_weights: RewardWeights = field(default_factory=RewardWeights)
@@ -117,7 +119,7 @@ class Config:
 
     # Input
     pdb: str = ""
-    chain: str = "B"
+    chain: str = "A"  # designed chain; matches environment.design_chain_index=0
 
     # Scaffold, ligand, and design scope (centralized target config)
     scaffold: ScaffoldConfig = field(default_factory=ScaffoldConfig)
@@ -128,7 +130,7 @@ class Config:
     mpnn_weights: str = "weights/vanilla/v_48_020.pt"
 
     # Training
-    steps: int = 10
+    steps: int = 10  # conservative default; configs/example.yaml uses 200
     variants: int = 8
     lr: float = 1e-4
     beta: float = 0.01
@@ -144,7 +146,7 @@ class Config:
     advantage_scale_factor: float = 5.0
 
     # Checkpointing
-    save_every: int = 15
+    save_every: int = 10  # matches configs/example.yaml
     cleanup_every: int = 0  # 0 = no cleanup
 
     # Output
@@ -154,8 +156,8 @@ class Config:
     num_seeds: int = 5
 
     # Reference structures for RMSD calculation (sampling mode)
-    closed_ref_pdb: str = ""   # Bound/closed reference PDB (e.g., 3lft-ldopa.pdb)
-    open_ref_pdb: str = ""     # Apo/open reference PDB (e.g., 3lft-open.pdb)
+    closed_ref_pdb: str = ""   # Bound/closed reference PDB (e.g., holo.pdb)
+    open_ref_pdb: str = ""     # Apo/open reference PDB (e.g., apo.pdb)
     design_chain_id: str = "A" # Chain ID for Cα extraction in RMSD calc
 
     # Decoy ligands for specificity testing (SMILES strings)

@@ -13,9 +13,15 @@
 
 set -euo pipefail
 
-# --- Adjust module loads / env activation to your cluster ---
-# module load cuda/12.8 cudnn apptainer/1.2.4 miniforge3
-# eval "$(conda shell.bash hook)" && conda activate bettermpnn
+# --- Environment setup (edit for your cluster) ---
+# Load CUDA / cuDNN / the container runtime and your Python/conda module:
+#   module load cuda/12.8 cudnn apptainer/1.2.4 miniforge3
+# NOTE: `module load <conda>` alone does NOT enable `conda activate` in a
+# non-interactive shell — you must source the shell hook first:
+#   eval "$(conda shell.bash hook)"
+#   conda activate bettermpnn
+# (If `conda` is not on PATH after the module load, call its hook by full path,
+#  e.g. eval "$(/path/to/miniforge/bin/conda shell.bash hook)".)
 
 export PYTHONUNBUFFERED=1
 
@@ -34,6 +40,10 @@ echo "Config: ${CONFIG_FILE}"
 echo "Output: ${OUTPUT_DIR}"
 command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-python -m bettermpnn.cli --config "${CONFIG_FILE}" --mode train --output "${OUTPUT_DIR}"
+# Capture the training exit code explicitly so trailing/cosmetic commands can't
+# mask success (e.g. a SIGPIPE under `pipefail` reporting a false failure).
+rc=0
+python -m bettermpnn.cli --config "${CONFIG_FILE}" --mode train --output "${OUTPUT_DIR}" || rc=$?
 
-echo "=== Done: $(date) ==="
+echo "=== Done: $(date) (exit ${rc}) ==="
+exit "${rc}"

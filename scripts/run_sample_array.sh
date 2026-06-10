@@ -18,9 +18,12 @@
 
 set -euo pipefail
 
-# --- Adjust module loads / env activation to your cluster ---
-# module load cuda/12.8 cudnn apptainer/1.2.4 miniforge3
-# eval "$(conda shell.bash hook)" && conda activate bettermpnn
+# --- Environment setup (edit for your cluster) ---
+#   module load cuda/12.8 cudnn apptainer/1.2.4 miniforge3
+# `module load <conda>` does NOT enable `conda activate` in a non-interactive
+# shell; source the hook first (use the full conda path if it is not on PATH):
+#   eval "$(conda shell.bash hook)"
+#   conda activate bettermpnn
 
 export PYTHONUNBUFFERED=1
 
@@ -50,12 +53,15 @@ echo "Start:  $(date)   Node: $(hostname)"
 echo "Config: ${CONFIG_FILE}   Output: ${OUTPUT_DIR}"
 command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
+# Capture the exit code so trailing/cosmetic commands can't mask success.
+rc=0
 python -m bettermpnn.cli \
     --config "${CONFIG_FILE}" \
     --mode sample \
     --output "${OUTPUT_DIR}" \
     --step-range "${STEP_START}-${STEP_END}" \
-    -v
+    -v || rc=$?
 
-echo "=== Task ${TASK_ID} done: $(date) ==="
+echo "=== Task ${TASK_ID} done: $(date) (exit ${rc}) ==="
 echo "Merge with: bash scripts/merge_results.sh ${OUTPUT_DIR}"
+exit "${rc}"
