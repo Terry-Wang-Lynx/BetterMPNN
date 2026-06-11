@@ -84,6 +84,17 @@ def test_parse_summary_requires_core_fields(tmp_path):
     assert env._parse_summary_file(str(bad)) is None
 
 
+def test_parse_summary_null_iptm(tmp_path):
+    env = _make_env(tmp_path, design_chain_index=0)
+    p = tmp_path / "apo.json"
+    p.write_text('{"iptm": null, "ptm": 0.9, "chain_pair_pae_min": [[0]]}')
+    # Strict (multi-chain) parse rejects null iptm...
+    assert env._parse_summary_file(str(p)) is None
+    # ...but apo parse (require_iptm=False) succeeds on ptm alone.
+    m = env._parse_summary_file(str(p), require_iptm=False)
+    assert m is not None and m["ptm"] == 0.9 and m["iptm"] == 0.0
+
+
 def test_parse_summary_rejects_non_finite(tmp_path):
     env = _make_env(tmp_path, design_chain_index=0)
     bad = tmp_path / "nan.json"

@@ -454,7 +454,8 @@ class AlphaFold3Environment(Environment):
         
         for seed_idx, seed_dir, summary_path in seed_dirs:
             try:
-                metrics = self._parse_summary_file(summary_path)
+                # Apo is single-chain: iptm is null, so parse on ptm alone.
+                metrics = self._parse_summary_file(summary_path, require_iptm=False)
                 if metrics is None:
                     continue
                 ptm = metrics.get("ptm", 0.0)
@@ -717,25 +718,29 @@ class AlphaFold3Environment(Environment):
             return None
         return self._parse_summary_file(summary_path)
 
-    def _parse_summary_file(self, summary_path: str) -> Optional[dict]:
-        """Parse a summary_confidences.json. iptm/ptm are required (missing -> None,
-        a parse failure, not a fake low score)."""
+    def _parse_summary_file(self, summary_path: str, require_iptm: bool = True) -> Optional[dict]:
+        """Parse a summary_confidences.json. ptm (and iptm unless require_iptm is
+        False, e.g. single-chain apo predictions where AF3 emits iptm=null) must
+        be a real number; a missing/null required field is a parse failure rather
+        than a fake low score."""
         try:
             with open(summary_path) as f:
                 data = json.load(f)
-            missing = [k for k in ("iptm", "ptm") if k not in data]
+            required = ("iptm", "ptm") if require_iptm else ("ptm",)
+            missing = [k for k in required if data.get(k) is None]
             if missing:
-                logger.error(f"AF3 summary {summary_path} missing {missing}; parse failure.")
+                logger.error(f"AF3 summary {summary_path} missing/null {missing}; parse failure.")
                 return None
             metrics = {
-                "iptm": float(data["iptm"]),
+                "iptm": float(data["iptm"]) if data.get("iptm") is not None else 0.0,
                 "ptm": float(data["ptm"]),
                 "has_clash": float(data.get("has_clash", 1.0)),
-                "ranking_score": float(data.get("ranking_score", 0.0)),
+                "ranking_score": float(data.get("ranking_score") or 0.0),
                 "mean_pae": self._extract_mean_pae(data),
                 "chain_ptm": data.get("chain_ptm", []),
             }
-            if not all(np.isfinite(metrics[k]) for k in ("iptm", "ptm", "ranking_score", "mean_pae")):
+            check = ("iptm", "ptm", "ranking_score", "mean_pae") if require_iptm else ("ptm", "ranking_score", "mean_pae")
+            if not all(np.isfinite(metrics[k]) for k in check):
                 logger.error(f"AF3 summary {summary_path} has non-finite metrics; parse failure.")
                 return None
             return metrics
