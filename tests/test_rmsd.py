@@ -26,11 +26,17 @@ def test_rmsd_invariant_to_rigid_motion_when_aligned():
     assert calculate_rmsd(coords, moved, align=False) > 1.0
 
 
-def test_rmsd_truncates_mismatched_lengths():
+def test_rmsd_mismatched_lengths_raises_by_default():
     a = np.zeros((5, 3))
     b = np.zeros((3, 3))
-    # Should not raise; truncates to the shorter length.
-    assert calculate_rmsd(a, b, align=False) == 0.0
+    # Strict by default: positional correspondence requires equal lengths.
+    try:
+        calculate_rmsd(a, b, align=False)
+        assert False, "expected ValueError on length mismatch"
+    except ValueError:
+        pass
+    # Opt-in truncation still available.
+    assert calculate_rmsd(a, b, align=False, allow_truncate=True) == 0.0
 
 
 def test_local_drmsd_zero_for_identical():

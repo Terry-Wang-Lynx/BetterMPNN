@@ -101,3 +101,18 @@ def test_empty_design_means_design_everything():
     d = DesignConfig(redesign_residues=[])
     assert d.get_redesign_positions("A") == []
     assert d.get_fixed_positions("A", 10) == []
+
+
+def test_malformed_redesign_residue_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        DesignConfig(redesign_residues=["A10", "oops"])
+
+
+def test_redesign_residues_no_chain_match_designs_whole_chain():
+    d = DesignConfig(redesign_residues=["B10", "B11"])
+    # None match chain A: get_redesign_positions returns [] (and warns), which the
+    # trainer/sampler treat as None -> whole-chain redesign.
+    assert d.get_redesign_positions("A") == []
+    # And matching positions are returned for the chain they belong to.
+    assert d.get_redesign_positions("B") == [10, 11]

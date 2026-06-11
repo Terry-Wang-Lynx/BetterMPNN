@@ -106,6 +106,26 @@ def test_multi_record_designed_msa_rejected(tmp_path):
         pass
 
 
+def test_decoy_builder_substitutes_sequence_and_ligand(tmp_path):
+    import pathlib
+    tp = pathlib.Path(tmp_path); tp.mkdir(parents=True, exist_ok=True)
+    template = {
+        "name": "t", "modelSeeds": [1],
+        "sequences": [
+            {"protein": {"id": ["A"], "sequence": "AAAA", "unpairedMsa": ">A\nAAAA"}},
+            {"ligand": {"id": ["L"], "smiles": "CCO"}},
+        ],
+    }
+    tpl = tp / "template.json"; tpl.write_text(json.dumps(template))
+    env = AlphaFold3Environment(EnvironmentConfig(template_json=str(tpl), design_chain_index=0),
+                                output_dir=str(tp / "out"))
+    path = env._create_decoy_input_json("WWWW", "c1ccccc1", "job", num_seeds=1)
+    out = json.loads(open(path).read())
+    assert out["sequences"][0]["protein"]["sequence"] == "WWWW"          # not silently dropped
+    assert out["sequences"][0]["protein"]["unpairedMsa"].splitlines()[1] == "WWWW"
+    assert out["sequences"][1]["ligand"]["smiles"] == "c1ccccc1"         # decoy substituted
+
+
 def test_design_chain_index_out_of_range_raises(tmp_path):
     env = _make_env(tmp_path, design_chain_index=5)
     try:

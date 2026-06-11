@@ -61,8 +61,10 @@ git clone https://github.com/Terry-Wang-Lynx/BetterMPNN.git
 cd BetterMPNN
 conda create -n bettermpnn python=3.11
 conda activate bettermpnn
-pip install -r requirements.txt
+pip install -e .          # installs the package + the `bettermpnn` console script
 ```
+
+(Use `pip install -r requirements.txt` instead if you only want the dependencies without installing the package.)
 
 Download ProteinMPNN weights:
 
