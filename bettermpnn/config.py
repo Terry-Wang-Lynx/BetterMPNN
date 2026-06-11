@@ -24,7 +24,6 @@ class RewardWeights:
 class ScaffoldConfig:
     """Scaffold protein configuration."""
     name: str = ""
-    sequence: str = ""
 
 
 @dataclass
@@ -152,7 +151,6 @@ class Config:
 
     # Checkpointing
     save_every: int = 10  # matches configs/example.yaml
-    cleanup_every: int = 0  # 0 = no cleanup
 
     # Output
     output_dir: str = "output"
@@ -215,7 +213,7 @@ class Config:
         for key in ("lr", "beta", "temperature", "grad_clip", "reward_shaping_alpha", "advantage_scale_factor"):
             if key in data and data[key] is not None:
                 data[key] = float(data[key])
-        for key in ("steps", "variants", "save_every", "cleanup_every", "num_seeds", "seed"):
+        for key in ("steps", "variants", "save_every", "num_seeds", "seed"):
             if key in data and data[key] is not None:
                 data[key] = int(data[key])
 

@@ -45,15 +45,12 @@ class Sampler:
         self.closed_ref_ca = self._load_reference_ca(config.closed_ref_pdb, config.design_chain_id, "closed")
 
         # Fail fast if a reference was given but extracted no Cα (wrong chain id).
+        # No fallback: without an explicit open_ref_pdb the open-RMSD filter stays
+        # off (it would otherwise reject plain binders by comparing to the scaffold).
         for path, ca in ((config.closed_ref_pdb, self.closed_ref_ca),
                          (config.open_ref_pdb, self.open_ref_ca)):
             if path and (ca is None or len(ca) == 0):
                 raise ValueError(f"{path}: no Cα for chain '{config.design_chain_id}'.")
-
-        # Fall back to the scaffold PDB if no open reference was provided.
-        if self.open_ref_ca is None or len(self.open_ref_ca) == 0:
-            logger.warning("No open reference PDB; using scaffold PDB for RMSD")
-            self.open_ref_ca = self._load_reference_ca(config.pdb, config.design_chain_id, "scaffold")
 
         if config.decoy_smiles and (self.closed_ref_ca is None or len(self.closed_ref_ca) == 0):
             logger.info("No closed reference: decoy specificity judged by iPTM only.")
