@@ -55,6 +55,18 @@ def test_grpo_loss_shapes_and_kl_nonneg():
     assert current.grad is not None
 
 
+def test_grpo_policy_gradient_sign():
+    # High advantage should push log-probs up (negative grad), low advantage down.
+    current = torch.zeros(2, 4, requires_grad=True)
+    ref = torch.zeros(2, 4)  # KL = 0, isolate the policy-gradient term
+    adv = torch.tensor([1.0, -1.0])
+    mask = torch.ones(2, 4)
+    out = compute_grpo_loss(current, ref, adv, mask, beta=0.0)
+    out.loss.backward()
+    assert (current.grad[0] < 0).all()   # +adv -> increase log-prob
+    assert (current.grad[1] > 0).all()   # -adv -> decrease log-prob
+
+
 def test_grpo_loss_respects_mask():
     # Construct per-token KL that differs between the first and second half of
     # each sequence, so masking out one half must change the loss.

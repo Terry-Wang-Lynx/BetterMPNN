@@ -77,6 +77,10 @@ def main():
     # GRPO needs at least two variants per step to form a group baseline.
     if config.mode == "train" and config.variants < 2:
         parser.error(f"train mode needs variants >= 2 to compute group-relative advantages (got {config.variants})")
+    # A design scope that matches no residue on the design chain would silently
+    # widen to whole-chain redesign — fail instead.
+    if config.design.redesign_residues and not config.design.get_redesign_positions(config.chain):
+        parser.error(f"design.redesign_residues is set but none match chain '{config.chain}'")
 
     # Reproducibility
     if config.seed is not None:

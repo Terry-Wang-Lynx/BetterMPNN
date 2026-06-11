@@ -76,7 +76,9 @@ class Sampler:
     @staticmethod
     def _load_reference_ca(pdb_path: str, chain_id: str, name: str):
         """Load reference Cα coordinates from a PDB file."""
-        if not pdb_path or not os.path.exists(pdb_path):
+        if not pdb_path:
+            return None
+        if not os.path.exists(pdb_path):
             logger.warning(f"Reference PDB not found for {name}: {pdb_path}")
             return None
         try:

@@ -77,19 +77,32 @@ class AlphaFold3Environment(Environment):
         with open(config.template_json) as f:
             self.template = json.load(f)
 
-        # Override ligand SMILES in template if provided via config
+        # Override ligand SMILES in template if provided via config. Requesting an
+        # override with no ligand block in the template is a misconfiguration.
         if target_smiles:
-            for seq_entry in self.template.get("sequences", []):
-                if "ligand" in seq_entry:
-                    seq_entry["ligand"]["smiles"] = target_smiles
-                    logger.info(f"Template ligand SMILES overridden: {target_smiles}")
-                    break
+            if not self._set_ligand_smiles(self.template, target_smiles):
+                raise ValueError(
+                    f"target ligand SMILES set ({target_smiles}) but the template "
+                    f"{config.template_json} has no 'ligand' entry."
+                )
+            logger.info(f"Template ligand SMILES overridden: {target_smiles}")
+
+    @staticmethod
+    def _set_ligand_smiles(data: dict, smiles: str) -> bool:
+        """Set the first ligand's SMILES; return False if there is no ligand entry."""
+        for seq_entry in data.get("sequences", []):
+            if "ligand" in seq_entry:
+                seq_entry["ligand"]["smiles"] = smiles
+                return True
+        return False
 
     def validate_design_chain(self, chain: str) -> None:
-        """Check that design_chain_index points at the chain named `chain`."""
+        """Check that design_chain_index is in range and names the chain `chain`."""
         idx = self.config.design_chain_index
         seqs = self.template.get("sequences", [])
-        ids = seqs[idx].get("protein", {}).get("id", []) if idx < len(seqs) else []
+        if not (0 <= idx < len(seqs)):
+            raise ValueError(f"design_chain_index={idx} out of range (0..{len(seqs) - 1}).")
+        ids = seqs[idx].get("protein", {}).get("id", [])
         ids = [ids] if isinstance(ids, str) else ids
         if chain not in ids:
             raise ValueError(
@@ -257,6 +270,11 @@ class AlphaFold3Environment(Environment):
             except Exception as e:
                 logger.warning(f"Failed to process seed {seed_idx} for {job_name}: {e}")
 
+        if len(seed_results) < num_seeds:
+            logger.warning(
+                f"{job_name}: parsed {len(seed_results)}/{num_seeds} AF3 seeds; "
+                f"missing seeds are not counted toward the pass rate."
+            )
         return seed_results
 
     @staticmethod
@@ -383,10 +401,8 @@ class AlphaFold3Environment(Environment):
         self._apply_designed_sequence(data, sequence)
 
         # Replace ligand SMILES with decoy
-        for seq_entry in data.get("sequences", []):
-            if "ligand" in seq_entry:
-                seq_entry["ligand"]["smiles"] = decoy_smiles
-                break
+        if not self._set_ligand_smiles(data, decoy_smiles):
+            raise ValueError("decoy SMILES configured but the template has no 'ligand' entry.")
 
         # Update name
         data["name"] = f"{data.get('name', 'decoy')}_decoy"
@@ -576,6 +592,11 @@ class AlphaFold3Environment(Environment):
                 dr.passed_specificity = False
                 decoy_results.append(dr)
                 continue
+            if parsed_seeds < num_seeds:
+                logger.warning(
+                    f"Decoy {job_name}: only {parsed_seeds}/{num_seeds} seeds parsed; "
+                    f"specificity judged on incomplete worst-case evidence."
+                )
 
             # Evaluate specificity
             dr.causes_closing = (min_closed_rmsd <= fc.decoy_closed_rmsd_min)
@@ -807,12 +828,19 @@ class AlphaFold3Environment(Environment):
 
     @staticmethod
     def _find_structure_path(directory: str) -> Optional[str]:
-        """Find a predicted structure CIF (AF3 names them *_model.cif / *_sample-*.cif)."""
+        """Find a predicted structure CIF, preferring the ranked top-level
+        *_model.cif over per-seed *_sample-*.cif so it pairs with the top-level
+        summary used for metrics."""
+        cands = []
         for root, _, files in os.walk(directory):
             for f in files:
                 if f.endswith(".cif") and ("model" in f or "sample" in f):
-                    return os.path.join(root, f)
-        return None
+                    cands.append(os.path.join(root, f))
+        if not cands:
+            return None
+        # Prefer a ranked model file not inside a per-seed subdirectory.
+        ranked = [c for c in cands if "seed-" not in c and "_model.cif" in c]
+        return (ranked or cands)[0]
 
     @staticmethod
     def _find_structure_in_dir(directory: str) -> Optional[str]:

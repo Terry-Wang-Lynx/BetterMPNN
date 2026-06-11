@@ -13,17 +13,20 @@ echo "=== Merging screening results from ${OUTPUT_DIR} ==="
 
 MERGED="${OUTPUT_DIR}/screening_log.csv"
 
-# Write header from the first file
-FIRST=$(ls "${OUTPUT_DIR}"/screening_log_step*.csv 2>/dev/null | head -1)
-if [ -z "${FIRST}" ]; then
+# Write header from the first file (array glob; nullglob so no-match is empty)
+shopt -s nullglob
+PARTS=( "${OUTPUT_DIR}"/screening_log_step*.csv )
+shopt -u nullglob
+if [ ${#PARTS[@]} -eq 0 ]; then
     echo "ERROR: No per-step CSV files found in ${OUTPUT_DIR}"
     exit 1
 fi
+FIRST="${PARTS[0]}"
 
 head -1 "${FIRST}" > "${MERGED}"
 
-# Append data (skip header) from all step files, sorted
-for f in "${OUTPUT_DIR}"/screening_log_step*.csv; do
+# Append data (skip header) from all step files
+for f in "${PARTS[@]}"; do
     tail -n +2 "${f}" >> "${MERGED}"
 done
 

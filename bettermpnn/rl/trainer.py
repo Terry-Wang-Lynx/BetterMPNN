@@ -173,9 +173,10 @@ class Trainer:
                     step=step,
                     variant=i,
                     num_seeds=cfg.filter.decoy_num_seeds,
-                    # Note: We don't have refs in Trainer by default, but env might have them
+                    open_ref_ca=getattr(self.env, "open_ref_ca", None),
+                    closed_ref_ca=getattr(self.env, "closed_ref_ca", None),
                     design_chain_id=cfg.design_chain_id,
-                    filter_config=cfg.filter
+                    filter_config=cfg.filter,
                 )
                 if decoy_results:
                     all_passed = all(dr.passed_specificity for dr in decoy_results)

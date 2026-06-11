@@ -105,9 +105,31 @@ def test_parse_summary_rejects_non_finite(tmp_path):
 def test_validate_design_chain(tmp_path):
     env = _make_env(tmp_path, design_chain_index=0)  # sequences[0].protein.id == ["A"]
     env.validate_design_chain("A")  # ok
+    for bad in ("B",):  # chain not in template
+        try:
+            env.validate_design_chain(bad)
+            assert False, "expected ValueError for chain not in template"
+        except ValueError:
+            pass
+    # Out-of-range / negative index must also be rejected.
+    env.config.design_chain_index = -1
     try:
-        env.validate_design_chain("B")
-        assert False, "expected ValueError for chain not in template"
+        env.validate_design_chain("A")
+        assert False, "expected ValueError for out-of-range design_chain_index"
+    except ValueError:
+        pass
+
+
+def test_ligand_override_without_ligand_block_raises(tmp_path):
+    import pathlib
+    tp = pathlib.Path(tmp_path); tp.mkdir(parents=True, exist_ok=True)
+    template = {"name": "t", "modelSeeds": [1],
+                "sequences": [{"protein": {"id": ["A"], "sequence": "AAAA"}}]}  # no ligand
+    tpl = tp / "t.json"; tpl.write_text(json.dumps(template))
+    try:
+        AlphaFold3Environment(EnvironmentConfig(template_json=str(tpl), design_chain_index=0),
+                              output_dir=str(tp / "out"), target_smiles="CCO")
+        assert False, "expected ValueError: ligand SMILES set but no ligand block"
     except ValueError:
         pass
 

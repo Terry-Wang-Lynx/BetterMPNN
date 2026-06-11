@@ -1,12 +1,9 @@
 """Unified configuration for BetterMPNN."""
 
-import logging
 import re
 import yaml
 from dataclasses import dataclass, field
 from typing import List, Optional
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,8 +47,6 @@ class DesignConfig:
     def get_redesign_positions(self, chain: str) -> List[int]:
         positions = [int(m.group(2)) for e in self.redesign_residues
                      if (m := re.match(r'^([A-Za-z])(\d+)$', e)) and m.group(1) == chain]
-        if self.redesign_residues and not positions:
-            logger.warning(f"redesign_residues set but none match chain '{chain}'; redesigning whole chain.")
         return sorted(positions)
 
     def get_fixed_positions(self, chain: str, chain_length: int) -> List[int]:
