@@ -85,6 +85,18 @@ class AlphaFold3Environment(Environment):
                     logger.info(f"Template ligand SMILES overridden: {target_smiles}")
                     break
 
+    def validate_design_chain(self, chain: str) -> None:
+        """Check that design_chain_index points at the chain named `chain`."""
+        idx = self.config.design_chain_index
+        seqs = self.template.get("sequences", [])
+        ids = seqs[idx].get("protein", {}).get("id", []) if idx < len(seqs) else []
+        ids = [ids] if isinstance(ids, str) else ids
+        if chain not in ids:
+            raise ValueError(
+                f"chain '{chain}' not found in template sequences[{idx}].protein.id={ids}; "
+                f"design_chain_index must point to the redesigned chain."
+            )
+
     def evaluate(self, sequence: str, step: int = 0, variant: int = 0) -> EvalResult:
         """Evaluate a single sequence (original single-best interface for training mode)."""
         job_name = f"step_{step}_variant_{variant}"
@@ -109,18 +121,21 @@ class AlphaFold3Environment(Environment):
         # 4. Find structure path (for iterative mode or RMSD calculation)
         structure_path = self._find_structure_path(output_dir)
 
-        # Conformational-change reward (only when refs were injected by the Trainer)
-        if structure_path and os.path.exists(structure_path) and (
-            self.open_ref_ca is not None or self.closed_ref_ca is not None
-        ):
+        # Conformational-change reward (only when refs were injected by the Trainer).
+        # Fail closed: if a reference is set but RMSD can't be computed, don't
+        # silently drop the term.
+        if self.open_ref_ca is not None or self.closed_ref_ca is not None:
             try:
+                if not (structure_path and os.path.exists(structure_path)):
+                    raise ValueError("no predicted structure CIF")
                 pred_ca = extract_ca_from_cif(structure_path, self.design_chain_id)
                 if self.open_ref_ca is not None:
                     metrics["open_rmsd"] = calculate_rmsd(pred_ca, self.open_ref_ca, align=True)
                 if self.closed_ref_ca is not None:
                     metrics["closed_rmsd"] = calculate_rmsd(pred_ca, self.closed_ref_ca, align=True)
             except Exception as e:
-                logger.debug(f"Training RMSD calc failed: {e}")
+                logger.warning(f"RMSD reward required but failed ({e}); scoring 0.")
+                return EvalResult(score=0.0, structure_path=structure_path, metrics={"error": "rmsd_failed"})
 
         # 6. Calculate reward
         score = self._calculate_reward(metrics)
@@ -614,16 +629,22 @@ class AlphaFold3Environment(Environment):
                 "-B", f"{os.path.dirname(json_path)}:/input",
                 "-B", f"{cfg.af3_run_dir}:/af3_run",
                 "-B", f"{cfg.af3_model_dir}:/model",
-                "-B", f"{cfg.af3_db_dir}:/dataset",
                 "-B", f"{os.path.abspath(output_dir)}:/output",
+            ]
+            # Only bind the database when it's set (inference-only needs no DB,
+            # and an empty bind source is rejected by the container runtime).
+            if cfg.af3_db_dir:
+                cmd += ["-B", f"{cfg.af3_db_dir}:/dataset"]
+            cmd += [
                 cfg.af3_sif,
                 "python", "/af3_run/run_alphafold.py",
                 f"--json_path=/input/{os.path.basename(json_path)}",
                 "--model_dir=/model",
-                "--db_dir=/dataset",
                 "--output_dir=/output",
                 f"--run_data_pipeline={'true' if cfg.run_data_pipeline else 'false'}",
             ]
+            if cfg.af3_db_dir:
+                cmd.append("--db_dir=/dataset")
         else:
             # Direct mode: run AF3 via env_script; paths shell-quoted.
             run_script = os.path.join(cfg.af3_run_dir, "run_alphafold.py")
@@ -706,7 +727,7 @@ class AlphaFold3Environment(Environment):
             if missing:
                 logger.error(f"AF3 summary {summary_path} missing {missing}; parse failure.")
                 return None
-            return {
+            metrics = {
                 "iptm": float(data["iptm"]),
                 "ptm": float(data["ptm"]),
                 "has_clash": float(data.get("has_clash", 1.0)),
@@ -714,6 +735,10 @@ class AlphaFold3Environment(Environment):
                 "mean_pae": self._extract_mean_pae(data),
                 "chain_ptm": data.get("chain_ptm", []),
             }
+            if not all(np.isfinite(metrics[k]) for k in ("iptm", "ptm", "ranking_score", "mean_pae")):
+                logger.error(f"AF3 summary {summary_path} has non-finite metrics; parse failure.")
+                return None
+            return metrics
         except Exception as e:
             logger.error(f"Failed to parse summary: {e}")
             return None
@@ -753,17 +778,17 @@ class AlphaFold3Environment(Environment):
 
         # Optional RMSD rewards for fine-tuning conformational change
         if metrics.get("open_rmsd") is not None and w.open_rmsd != 0:
-            # Reward higher RMSD vs open ref (deviating from apo)
-            # Max expected RMSD is around 10A, normalize or cap? 
-            # Let's use raw Å with a weight or a tanh-like scale.
+            # Reward deviation from the apo (open) state, capped at 10 Å.
             reward += w.open_rmsd * min(metrics["open_rmsd"], 10.0) / 10.0
-        
+
         if metrics.get("closed_rmsd") is not None and w.closed_rmsd != 0:
-            # Reward lower RMSD vs closed ref (reaching holo)
+            # Reward proximity to the holo (closed) state.
             reward += w.closed_rmsd * (1.0 - min(metrics["closed_rmsd"], 10.0) / 10.0)
 
-        # Clamp to [0, 1]. (If a whole group saturates at 1.0, GRPO advantages
-        # vanish for that step; rare with default weights.)
+        if not np.isfinite(reward):
+            return 0.0
+        # Clamp to [0, 1]. (A whole group saturating at 1.0 zeros GRPO advantages
+        # that step; rare with default weights.)
         return max(0.0, min(1.0, reward))
 
     @staticmethod

@@ -84,6 +84,23 @@ def test_parse_summary_requires_core_fields(tmp_path):
     assert env._parse_summary_file(str(bad)) is None
 
 
+def test_parse_summary_rejects_non_finite(tmp_path):
+    env = _make_env(tmp_path, design_chain_index=0)
+    bad = tmp_path / "nan.json"
+    bad.write_text('{"iptm": NaN, "ptm": 0.8}')  # NaN is valid in Python's json
+    assert env._parse_summary_file(str(bad)) is None
+
+
+def test_validate_design_chain(tmp_path):
+    env = _make_env(tmp_path, design_chain_index=0)  # sequences[0].protein.id == ["A"]
+    env.validate_design_chain("A")  # ok
+    try:
+        env.validate_design_chain("B")
+        assert False, "expected ValueError for chain not in template"
+    except ValueError:
+        pass
+
+
 def test_multi_record_designed_msa_rejected(tmp_path):
     import pathlib
     tp = pathlib.Path(tmp_path)

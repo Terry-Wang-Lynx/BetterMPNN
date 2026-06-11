@@ -14,7 +14,7 @@ The three components:
 - **Environment** — Black-box scoring: `sequence → scalar reward`. Pluggable — AF3, Protenix, ESMFold, or any custom predictor
 - **GRPO** — Computes group-relative advantages and updates the agent with KL-regularized policy gradient
 
-Each step: sample N sequences → score them → compute advantages relative to the group mean → backpropagate GRPO loss → repeat.
+Each step: sample N sequences → score them → compute advantages relative to the group mean → backpropagate GRPO loss → repeat. Each step samples fresh on-policy and takes a single update, so the importance ratio is 1 and no PPO-style clipping is needed.
 
 **Two modes**
 
@@ -26,6 +26,8 @@ Both modes support **small-molecule ligands** (SMILES), **residue-level design s
 **Reward Function (AlphaFold 3 example)**
 
 The included AF3 environment combines: `Reward = a * (1 - PAE / PAE_MAX) + b * ipTM + c * pTM - d * clash_penalty`
+
+where `PAE` is the mean of AF3's inter-chain `chain_pair_pae_min` between the designed chain and the others (an interface-confidence proxy, not the full mean PAE matrix).
 
 By pre-computing the target's MSA and running AF3 in inference-only mode (no data pipeline), each evaluation takes on the order of a minute on a modern data-center GPU; exact timing depends on the GPU, sequence lengths, and the number of diffusion samples and recycles.
 
@@ -134,7 +136,9 @@ The "Default" column below shows the values used in `configs/example.yaml`; the 
 | `decoy_smiles` | `[]` | Interferent SMILES for specificity filtering (sample mode) |
 | `open_ref_pdb` / `closed_ref_pdb` | none | Reference structures for conformational RMSD |
 
-> Three settings select the same chain and must agree: `chain` (the chain ProteinMPNN redesigns), `environment.design_chain_index` (its position in the template JSON `sequences` list), and `design_chain_id` (the chain used for Cα/RMSD extraction). A sequence-length mismatch against the template is flagged at runtime, and a misconfigured RMSD reference (no Cα extracted for `design_chain_id`) fails fast.
+> Three settings select the same chain and must agree: `chain` (the chain ProteinMPNN redesigns), `environment.design_chain_index` (its position in the template JSON `sequences` list), and `design_chain_id` (the chain used for Cα/RMSD extraction). They are cross-checked at startup (the run aborts if `design_chain_index` doesn't point to `chain`), and a misconfigured RMSD reference fails fast.
+
+> `seed` makes the Python/NumPy/torch sampling reproducible (per step, `seed + step`); GPU kernel nondeterminism and AF3/JAX inference are not controlled, so exact scores may still vary slightly across machines.
 
 **Output**
 

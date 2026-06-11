@@ -101,6 +101,11 @@ def main():
         design_chain_id=config.design_chain_id,
     )
 
+    # The three chain selectors must agree.
+    if config.chain != config.design_chain_id:
+        logger.warning(f"chain={config.chain} != design_chain_id={config.design_chain_id}; they should match.")
+    env.validate_design_chain(config.chain)
+
     if config.mode == "sample":
         # Sampling mode: frozen MPNN + multi-seed AF3 + filtering
         from .rl.sampler import Sampler

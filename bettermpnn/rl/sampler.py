@@ -157,6 +157,10 @@ class Sampler:
             steps_to_run = list(range(cfg.steps))
             worker_suffix = ""
 
+        if not steps_to_run:
+            logger.warning(f"No steps to run for range {step_range} (steps={cfg.steps}); nothing to do.")
+            return self._save_summary(worker_suffix)
+
         # Init CSV with worker-specific name to avoid contention
         self._init_csv_log(worker_suffix)
 

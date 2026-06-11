@@ -97,6 +97,9 @@ class MPNNModel:
         fixed_position_dict = None
         if design_positions:
             seq_len = len(pdb_dict_list[0].get(f"seq_chain_{chain}", ""))
+            oob = [p for p in design_positions if not (1 <= p <= seq_len)]
+            if oob:
+                raise ValueError(f"redesign positions {oob} out of range for chain {chain} (length {seq_len}).")
             fixed_pos = [i for i in range(1, seq_len + 1) if i not in design_positions]
             fixed_position_dict = {pdb_dict_list[0]["name"]: {chain: fixed_pos}}
             logger.info(f"Designing {len(design_positions)} residues out of {seq_len} in chain {chain}")
