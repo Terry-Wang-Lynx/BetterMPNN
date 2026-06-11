@@ -113,6 +113,8 @@ Sampling outputs land in `passed/` (cleared all filters incl. specificity),
 
 Only the target needs a rich MSA; the redesigned chain uses a single-sequence MSA. Obtain the target MSA from the [AlphaFold Server](https://alphafoldserver.com/) or Jackhmmer and paste it into the corresponding chain's `unpairedMsa`/`pairedMsa` field in the template JSON (AF3 A3M format). For the redesigned chain, keep a single-sequence MSA: a two-line `>name\n<SEQUENCE>` block whose second line is the query sequence — BetterMPNN substitutes each designed sequence into that line at runtime.
 
+The bundled `configs/af3_template.json` is a protein–protein binder (no ligand). To use the `ligand.smiles` / `decoy_smiles` features, add a `ligand` entry to the template — otherwise those options raise a clear error.
+
 **Key Parameters**
 
 The "Default" column below shows the values used in `configs/example.yaml`; the dataclass defaults in `bettermpnn/config.py` are more conservative (e.g. `steps=10`) and are overridden by any value you set in the config.
@@ -140,7 +142,7 @@ The "Default" column below shows the values used in `configs/example.yaml`; the 
 
 > `seed` makes the Python/NumPy/torch sampling reproducible (per step, `seed + step`); GPU kernel nondeterminism and AF3/JAX inference are not controlled, so exact scores may still vary slightly across machines.
 
-**Output**
+**Output** (the `--output` dir; the bundled SLURM launchers set it to `output_training_<jobid>` / `output_sampling_<jobid>`)
 
 ```
 output/

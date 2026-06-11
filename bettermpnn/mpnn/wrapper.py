@@ -3,7 +3,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Optional
+
 
 import numpy as np
 import torch

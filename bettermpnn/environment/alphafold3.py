@@ -271,11 +271,13 @@ class AlphaFold3Environment(Environment):
             except Exception as e:
                 logger.warning(f"Failed to process seed {seed_idx} for {job_name}: {e}")
 
-        if len(seed_results) < num_seeds:
-            logger.warning(
-                f"{job_name}: parsed {len(seed_results)}/{num_seeds} AF3 seeds; "
-                f"missing seeds are not counted toward the pass rate."
-            )
+        # Emit explicit failed results for any seeds AF3 did not produce, so they
+        # count toward the pass-rate denominator instead of silently vanishing.
+        missing = num_seeds - len(seed_results)
+        if missing > 0:
+            logger.warning(f"{job_name}: parsed {len(seed_results)}/{num_seeds} AF3 seeds; rest counted as failed.")
+            for _ in range(missing):
+                seed_results.append(SeedResult(seed=-1, metrics={"error": "missing_seed"}, passed=False))
         return seed_results
 
     @staticmethod
@@ -448,7 +450,10 @@ class AlphaFold3Environment(Environment):
         variant: int,
         num_seeds: int = 1,
     ) -> Optional[str]:
-        """Evaluate a sequence without any ligands to get the predicted Apo state."""
+        """Predict the ligand-free (apo) state. No-op if the template has no
+        ligand to remove (the prediction would just repeat the bound complex)."""
+        if not any("ligand" in s for s in self.template.get("sequences", [])):
+            return None
         job_name = f"step_{step}_variant_{variant}_apo"
         json_path = self._create_apo_input_json(sequence, job_name, num_seeds=num_seeds)
         
@@ -586,16 +591,16 @@ class AlphaFold3Environment(Environment):
             dr.min_closed_rmsd = min_closed_rmsd
             dr.structure_path = best_decoy_cif
 
-            if parsed_seeds == 0:
-                logger.warning(f"Decoy {job_name}: no parseable AF3 output; specificity fails closed.")
+            if parsed_seeds < num_seeds:
+                # Worst-case specificity needs all seeds: a missing one could have
+                # been the high-iPTM / closed-state case, so fail closed.
+                logger.warning(
+                    f"Decoy {job_name}: only {parsed_seeds}/{num_seeds} seeds parsed; "
+                    f"specificity fails closed."
+                )
                 dr.passed_specificity = False
                 decoy_results.append(dr)
                 continue
-            if parsed_seeds < num_seeds:
-                logger.warning(
-                    f"Decoy {job_name}: only {parsed_seeds}/{num_seeds} seeds parsed; "
-                    f"specificity judged on incomplete worst-case evidence."
-                )
 
             # Evaluate specificity
             dr.causes_closing = (min_closed_rmsd <= fc.decoy_closed_rmsd_min)

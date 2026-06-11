@@ -84,6 +84,12 @@ def test_parse_summary_requires_core_fields(tmp_path):
     assert env._parse_summary_file(str(bad)) is None
 
 
+def test_evaluate_apo_noop_without_ligand(tmp_path):
+    # No ligand in the template -> apo would just repeat the complex, so skip it.
+    env = _make_env(tmp_path, design_chain_index=0)  # protein-only template
+    assert env.evaluate_apo("AAAA", step=0, variant=0) is None
+
+
 def test_parse_summary_null_iptm(tmp_path):
     env = _make_env(tmp_path, design_chain_index=0)
     p = tmp_path / "apo.json"

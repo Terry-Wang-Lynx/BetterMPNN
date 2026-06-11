@@ -8,7 +8,6 @@ import shutil
 import time
 from typing import Optional
 
-import numpy as np
 import torch
 
 from ..config import Config
@@ -164,7 +163,7 @@ class Sampler:
         self._init_csv_log(worker_suffix)
 
         logger.info(f"{'='*60}")
-        logger.info(f"BetterMPNN Large-Scale Sampling Pipeline")
+        logger.info("BetterMPNN Large-Scale Sampling Pipeline")
         logger.info(f"{'='*60}")
         logger.info(f"Steps: {steps_to_run[0]+1}-{steps_to_run[-1]+1} "
                      f"({len(steps_to_run)} of {cfg.steps} total)")
@@ -348,7 +347,6 @@ class Sampler:
 
     def _extract_complete_set(self, sr, target_dir):
         """Copy target, decoy, and open-ref structures to the given directory."""
-        import shutil
         # Target bound structure
         if sr.structure_path and os.path.exists(sr.structure_path):
             shutil.copy2(sr.structure_path, os.path.join(target_dir, "bound_target.cif"))

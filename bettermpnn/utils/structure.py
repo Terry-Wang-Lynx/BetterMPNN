@@ -1,7 +1,6 @@
 """Structure format conversion and coordinate extraction utilities."""
 
 import logging
-from typing import Optional
 
 import numpy as np
 

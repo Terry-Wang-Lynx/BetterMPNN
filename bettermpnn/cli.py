@@ -105,9 +105,10 @@ def main():
         design_chain_id=config.design_chain_id,
     )
 
-    # The three chain selectors must agree.
+    # The three chain selectors must agree, or RMSD would be scored on a different
+    # chain than the one being redesigned.
     if config.chain != config.design_chain_id:
-        logger.warning(f"chain={config.chain} != design_chain_id={config.design_chain_id}; they should match.")
+        parser.error(f"chain={config.chain} != design_chain_id={config.design_chain_id}; they must match.")
     env.validate_design_chain(config.chain)
 
     if config.mode == "sample":

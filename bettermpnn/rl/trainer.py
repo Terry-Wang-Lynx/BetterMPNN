@@ -13,7 +13,6 @@ import torch.optim as optim
 
 from ..config import Config
 from ..environment.base import Environment
-from ..environment.alphafold3 import SeedResult, DecoyResult
 from ..mpnn.wrapper import MPNNModel
 from ..utils.plotting import plot_training_curves
 from .grpo import compute_advantages, compute_grpo_loss
@@ -186,12 +185,6 @@ class Trainer:
                         "passed_str": "PASS" if all_passed else "FAIL",
                         "results": decoy_results
                     }
-                    # Cleanup decoy predictions (save space)
-                    if cfg.cleanup_predictions:
-                        for d_idx in range(len(cfg.decoy_smiles)):
-                            decoy_job = f"step_{step}_variant_{i}_decoy{d_idx}"
-                            self.env.cleanup_prediction_dir(os.path.join(self.env.prediction_dir, decoy_job))
-                            self.env.cleanup_prediction_dir(os.path.join(self.env.input_dir, decoy_job))
 
             logger.info(f"  variant {i}: score={res.score:.4f}  {res.metrics}")
             # Log every variant to CSV
@@ -199,10 +192,16 @@ class Trainer:
             for k, v in res.metrics.items():
                 if isinstance(v, (int, float)):
                     metrics_acc[k].append(v)
-            
-            # Save the best structure in a dedicated folder
+
+            # Save the best structure set, then clean up its decoy predictions
+            # (must come after the save so the decoy CIFs still exist to copy).
             if i == best_idx:
                 self._save_best_variant_set(step, i, res, decoy_info)
+                if decoy_info.get("tested") and cfg.cleanup_predictions:
+                    for d_idx in range(len(cfg.decoy_smiles)):
+                        decoy_job = f"step_{step}_variant_{i}_decoy{d_idx}"
+                        self.env.cleanup_prediction_dir(os.path.join(self.env.prediction_dir, decoy_job))
+                        self.env.cleanup_prediction_dir(os.path.join(self.env.input_dir, decoy_job))
 
         rewards = torch.tensor([r.score for r in results], device=self.device)
 
