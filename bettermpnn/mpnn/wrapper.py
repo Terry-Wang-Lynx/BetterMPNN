@@ -46,18 +46,10 @@ class MPNNModel:
 
     @classmethod
     def load(cls, weights_path: str, device: str = "cuda") -> "MPNNModel":
-        """Load a ProteinMPNN model from checkpoint.
-
-        Prefers the safe ``weights_only=True`` loader; falls back to the legacy
-        loader only if the checkpoint format requires it (older torch).
-        """
+        """Load a ProteinMPNN model from checkpoint."""
         try:
             checkpoint = torch.load(weights_path, map_location=device, weights_only=True)
         except Exception:
-            logger.warning(
-                "weights_only=True load failed; falling back to weights_only=False "
-                "(only load checkpoints you trust)"
-            )
             checkpoint = torch.load(weights_path, map_location=device, weights_only=False)
         num_edges = checkpoint["num_edges"]
 
@@ -74,12 +66,7 @@ class MPNNModel:
         )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
-        # Use eval() (dropout off) even for the trainable policy: parameters stay
-        # differentiable, but sampling and log-prob evaluation become deterministic
-        # given the inputs. This keeps the GRPO importance ratio exp(cur-cur.detach())
-        # at 1 and the step-0 KL at 0, instead of injecting dropout-mask noise that
-        # would bias the policy gradient and the KL against the eval-mode reference.
-        model.eval()
+        model.eval()  # dropout off: deterministic log-probs, params stay trainable
         logger.info(f"Loaded ProteinMPNN from {weights_path} (k={num_edges})")
         return cls(model, device, num_edges)
 
@@ -125,10 +112,8 @@ class MPNNModel:
          pssm_coef, pssm_bias, pssm_log_odds_all,
          bias_by_res_all, tied_beta) = feats
 
-        # Omit 'X' (index 20 in the ProteinMPNN alphabet) so we never emit an
-        # unknown residue that a downstream structure predictor would reject.
         omit_AAs_np = np.zeros(21)
-        omit_AAs_np[20] = 1.0
+        omit_AAs_np[20] = 1.0  # omit 'X' (unknown residue)
 
         with torch.no_grad():
             randn = torch.randn(chain_M.shape, device=X.device)

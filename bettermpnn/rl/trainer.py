@@ -34,9 +34,7 @@ class Trainer:
         self.optimizer = optim.Adam(mpnn.model.parameters(), lr=config.lr)
         self.current_pdb = config.pdb
 
-        # Load reference structures so conformational-change RMSD reward terms
-        # (reward_weights.open_rmsd / closed_rmsd) are actually applied in train
-        # mode. Without this the env never computes those metrics.
+        # Make conformational-RMSD reward terms work in train mode.
         self._load_reference_structures()
 
         os.makedirs(config.output_dir, exist_ok=True)
@@ -45,27 +43,22 @@ class Trainer:
     def _load_reference_structures(self) -> None:
         """Inject open/closed reference Cα coords into the environment, if set."""
         cfg = self.config
-        if not (cfg.open_ref_pdb or cfg.closed_ref_pdb):
+        if not (cfg.open_ref_pdb or cfg.closed_ref_pdb) or not hasattr(self.env, "open_ref_ca"):
             return
-        if not hasattr(self.env, "open_ref_ca"):
-            return  # custom environment without RMSD support
         from ..utils.structure import extract_ca_from_pdb
         for attr, path, name in (
             ("open_ref_ca", cfg.open_ref_pdb, "open"),
             ("closed_ref_ca", cfg.closed_ref_pdb, "closed"),
         ):
-            if path and os.path.exists(path):
-                ca = extract_ca_from_pdb(path, cfg.design_chain_id)
-                if len(ca) == 0:
-                    # Fail fast: a provided ref with no Cα means the chain id is wrong.
-                    raise ValueError(
-                        f"{name}_ref_pdb={path} yielded no Cα atoms for chain "
-                        f"'{cfg.design_chain_id}'. Check the path and design_chain_id."
-                    )
-                setattr(self.env, attr, ca)
-                logger.info(f"Loaded {name} reference ({len(ca)} Cα) from {path}")
-            elif path:
+            if not path:
+                continue
+            if not os.path.exists(path):
                 raise ValueError(f"{name} reference PDB not found: {path}")
+            ca = extract_ca_from_pdb(path, cfg.design_chain_id)
+            if len(ca) == 0:
+                raise ValueError(f"{name}_ref_pdb={path}: no Cα for chain '{cfg.design_chain_id}'.")
+            setattr(self.env, attr, ca)
+            logger.info(f"Loaded {name} reference ({len(ca)} Cα) from {path}")
 
     def _init_csv_log(self):
         """Initialize the per-variant CSV log file."""
@@ -152,11 +145,8 @@ class Trainer:
         """Execute one training step: sample -> evaluate -> update."""
         cfg = self.config
 
-        # Reseed per global step so each step's sampling is distinct and
-        # reproducible (and so parallel sampling workers on disjoint step
-        # ranges never draw identical batches).
         if cfg.seed is not None:
-            torch.manual_seed(cfg.seed + step)
+            torch.manual_seed(cfg.seed + step)  # distinct, reproducible per step
 
         # --- Sample sequences ---
         design_positions = cfg.design.get_redesign_positions(cfg.chain)
@@ -215,15 +205,11 @@ class Trainer:
 
         rewards = torch.tensor([r.score for r in results], device=self.device)
 
-        # Exclude variants whose AF3 evaluation failed. Their placeholder
-        # score=0.0 would otherwise shift the group baseline and inject a
-        # spurious gradient into the GRPO update.
+        # Exclude failed AF3 variants (score=0.0) from the GRPO baseline.
         valid = [i for i, r in enumerate(results) if "error" not in r.metrics]
         n_failed = len(results) - len(valid)
         if n_failed:
-            logger.warning(
-                f"  {n_failed}/{len(results)} variant(s) failed AF3; excluded from the GRPO update"
-            )
+            logger.warning(f"  {n_failed}/{len(results)} variant(s) failed AF3; excluded from update")
 
         current_logps = self.mpnn.compute_log_probs(samples)
         with torch.no_grad():

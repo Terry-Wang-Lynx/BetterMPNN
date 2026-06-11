@@ -68,10 +68,7 @@ class AlphaFold3Environment(Environment):
         os.makedirs(self.input_dir, exist_ok=True)
         os.makedirs(self.prediction_dir, exist_ok=True)
 
-        # Optional reference Cα coords for conformational-change reward during
-        # training mode. Populated by the Trainer from config.open_ref_pdb /
-        # config.closed_ref_pdb; the sampler passes references explicitly as
-        # method arguments instead.
+        # Reference Cα for the train-mode conformational reward (set by Trainer).
         self.open_ref_ca: Optional["np.ndarray"] = None
         self.closed_ref_ca: Optional["np.ndarray"] = None
         self._chain_len_warned = False
@@ -112,8 +109,7 @@ class AlphaFold3Environment(Environment):
         # 4. Find structure path (for iterative mode or RMSD calculation)
         structure_path = self._find_structure_path(output_dir)
 
-        # 5. Calculate RMSD for the conformational-change reward, when the
-        # Trainer has injected reference Cα coordinates (open/closed states).
+        # Conformational-change reward (only when refs were injected by the Trainer)
         if structure_path and os.path.exists(structure_path) and (
             self.open_ref_ca is not None or self.closed_ref_ca is not None
         ):
@@ -222,14 +218,9 @@ class AlphaFold3Environment(Environment):
                 elif want_open or want_closed:
                     rmsd_error = "no predicted structure CIF found"
 
-                # Fail closed: if an RMSD reference was configured but we could
-                # not compute the required RMSD for this seed, the seed must not
-                # pass on iPTM alone (that would silently weaken the filter).
+                # Fail closed: RMSD required but not computable -> don't pass on iPTM alone.
                 if (want_open or want_closed) and rmsd_error is not None:
-                    logger.warning(
-                        f"Seed {seed_idx} for {job_name}: RMSD required but not "
-                        f"computable ({rmsd_error}); failing this seed (fail-closed)."
-                    )
+                    logger.warning(f"Seed {seed_idx} {job_name}: RMSD uncomputable ({rmsd_error}); failed.")
                     passed = False
                 else:
                     passed = self._check_filter(
@@ -320,59 +311,34 @@ class AlphaFold3Environment(Environment):
         return json_path
 
     def _apply_designed_sequence(self, data: dict, sequence: str) -> None:
-        """Substitute the designed sequence (and its single-sequence MSA) into
-        the design chain of an AF3 input ``data`` dict, in place.
-
-        Shared by the target/decoy/apo input builders so none of them can
-        silently drop the sequence. Raises on a misconfigured template.
-        """
+        """Substitute the designed sequence + single-sequence MSA into the design
+        chain (in place). Shared by all builders; raises on a bad template."""
         idx = self.config.design_chain_index
         sequences = data.get("sequences", [])
         if idx >= len(sequences):
-            raise ValueError(
-                f"design_chain_index={idx} is out of range for template with "
-                f"{len(sequences)} sequence entries ({self.config.template_json}). "
-                f"Set environment.design_chain_index to the designed chain's position."
-            )
+            raise ValueError(f"design_chain_index={idx} out of range ({len(sequences)} entries).")
         chain = sequences[idx].get("protein")
         if chain is None:
-            raise ValueError(
-                f"Template sequence entry at design_chain_index={idx} has no "
-                f"'protein' block; it cannot be the designed chain. Check that "
-                f"design_chain_index points to the redesigned protein chain."
-            )
+            raise ValueError(f"Template entry at design_chain_index={idx} has no 'protein' block.")
         old_seq = chain.get("sequence", "")
         if old_seq and len(old_seq) != len(sequence):
-            # Fixed-backbone redesign keeps the chain length identical; a
-            # mismatch almost always means design_chain_index points at the
-            # wrong chain (e.g. the target instead of the binder).
             self._warn_once_chain_len(
-                f"Designed sequence length ({len(sequence)}) != template chain "
-                f"length at design_chain_index={idx} ({len(old_seq)}). "
-                f"Verify design_chain_index matches the chain you redesign."
+                f"Designed length {len(sequence)} != template chain length {len(old_seq)} "
+                f"at design_chain_index={idx}; check design_chain_index."
             )
         chain["sequence"] = sequence
-        # Update the MSA. The designed chain must use a single-sequence MSA (a
-        # ">name\nSEQUENCE" block) because its sequence changes every step: we
-        # replace that query line. A multi-record MSA cannot be updated this way
-        # without silently corrupting alignment columns, so reject it outright.
+        # Designed chain needs a single-sequence MSA (query line is replaced each step).
         for msa_key in ("unpairedMsa", "pairedMsa"):
             msa = chain.get(msa_key, "")
             if msa:
                 lines = msa.splitlines()
                 if sum(1 for ln in lines if ln.startswith(">")) > 1:
-                    raise ValueError(
-                        f"Designed chain (design_chain_index={idx}) has a "
-                        f"multi-record {msa_key}; only a single-sequence MSA is "
-                        f"supported for the redesigned chain. Provide a two-line "
-                        f"'>name\\nSEQUENCE' block instead."
-                    )
+                    raise ValueError(f"Designed chain {msa_key} must be single-sequence, not multi-record.")
                 if len(lines) >= 2:
                     lines[1] = sequence
                 chain[msa_key] = "\n".join(lines)
 
     def _warn_once_chain_len(self, msg: str) -> None:
-        """Emit the chain-length mismatch warning only once per run."""
         if not getattr(self, "_chain_len_warned", False):
             logger.warning(msg)
             self._chain_len_warned = True
@@ -540,12 +506,7 @@ class AlphaFold3Environment(Environment):
             best_decoy_cif = None
 
             if not success:
-                # Fail closed: a decoy run we could not evaluate must not be
-                # counted as evidence of specificity, or a non-specific binder
-                # could slip through the screen on infrastructure flakiness.
-                logger.warning(
-                    f"Decoy AF3 failed for {job_name}; marking specificity as NOT passed (fail-closed)"
-                )
+                logger.warning(f"Decoy AF3 failed for {job_name}; specificity fails closed.")
                 dr.passed_specificity = False
                 decoy_results.append(dr)
                 continue
@@ -595,13 +556,7 @@ class AlphaFold3Environment(Environment):
             dr.structure_path = best_decoy_cif
 
             if parsed_seeds == 0:
-                # AF3 "succeeded" but produced no parseable seed summary; we have
-                # no evidence the variant is specific against this decoy, so fail
-                # closed rather than certify specificity on default values.
-                logger.warning(
-                    f"Decoy {job_name}: no parseable AF3 seed output; marking "
-                    f"specificity as NOT passed (fail-closed)"
-                )
+                logger.warning(f"Decoy {job_name}: no parseable AF3 output; specificity fails closed.")
                 dr.passed_specificity = False
                 decoy_results.append(dr)
                 continue
@@ -624,30 +579,18 @@ class AlphaFold3Environment(Environment):
 
     @staticmethod
     def _resolve_container_runtime(configured: str) -> str:
-        """Resolve the container runtime binary.
-
-        "auto" (or empty) detects apptainer/singularity on PATH, preferring
-        apptainer. An explicit value is used as-is (falling back to PATH lookup
-        if it is a bare name that is not directly executable).
-        """
+        """Resolve the container binary; "auto"/empty detects apptainer or singularity."""
         if configured and configured not in ("auto", "singularity", "apptainer"):
             return configured
-        if configured in ("singularity", "apptainer"):
-            found = shutil.which(configured)
-            if found:
-                return found
-        for candidate in ("apptainer", "singularity"):
+        for candidate in ([configured] if configured in ("singularity", "apptainer") else []) \
+                + ["apptainer", "singularity"]:
             found = shutil.which(candidate)
             if found:
                 return found
-        # Last resort: return whatever was configured (or a sensible default)
         return configured if configured not in ("", "auto") else "apptainer"
 
     def cleanup_prediction_dir(self, prediction_dir: str) -> None:
-        """Delete AF3 prediction directory to save disk space.
-
-        Called after all results have been extracted and logged.
-        """
+        """Delete an AF3 prediction directory to save disk space."""
         try:
             if os.path.isdir(prediction_dir):
                 shutil.rmtree(prediction_dir)
@@ -682,8 +625,7 @@ class AlphaFold3Environment(Environment):
                 f"--run_data_pipeline={'true' if cfg.run_data_pipeline else 'false'}",
             ]
         else:
-            # Direct mode: run AF3 as a subprocess with env_script. Paths are
-            # shell-quoted so spaces/metacharacters can't break the command.
+            # Direct mode: run AF3 via env_script; paths shell-quoted.
             run_script = os.path.join(cfg.af3_run_dir, "run_alphafold.py")
             shell_cmd = ""
             if cfg.af3_env_script:
@@ -696,8 +638,6 @@ class AlphaFold3Environment(Environment):
                 f" --run_data_pipeline={'true' if cfg.run_data_pipeline else 'false'}"
                 f" --run_inference=true"
             )
-            # The data pipeline needs the genetic databases; container mode always
-            # binds them, so mirror that here when the pipeline is enabled.
             if cfg.run_data_pipeline and cfg.af3_db_dir:
                 shell_cmd += f" --db_dir={shlex.quote(cfg.af3_db_dir)}"
             cmd = ["bash", "-c", shell_cmd]
@@ -757,23 +697,14 @@ class AlphaFold3Environment(Environment):
         return self._parse_summary_file(summary_path)
 
     def _parse_summary_file(self, summary_path: str) -> Optional[dict]:
-        """Parse a single summary_confidences.json file.
-
-        The interface-confidence metrics (``iptm``, ``ptm``) are required: if the
-        file is missing them the schema/layout is wrong, and we return None
-        (a parse failure) rather than silently substituting a low score that
-        would look like a genuinely bad prediction. ``has_clash`` /
-        ``ranking_score`` are treated as optional with conservative defaults.
-        """
+        """Parse a summary_confidences.json. iptm/ptm are required (missing -> None,
+        a parse failure, not a fake low score)."""
         try:
             with open(summary_path) as f:
                 data = json.load(f)
             missing = [k for k in ("iptm", "ptm") if k not in data]
             if missing:
-                logger.error(
-                    f"AF3 summary {summary_path} is missing required field(s) "
-                    f"{missing}; treating as a parse failure."
-                )
+                logger.error(f"AF3 summary {summary_path} missing {missing}; parse failure.")
                 return None
             return {
                 "iptm": float(data["iptm"]),
@@ -788,20 +719,15 @@ class AlphaFold3Environment(Environment):
             return None
 
     def _extract_mean_pae(self, data: dict) -> float:
-        """Mean inter-chain PAE between the designed chain and every other chain.
-
-        Uses ``chain_pair_pae_min`` (a square matrix indexed by chain order in
-        the template) and the configured ``design_chain_index`` rather than
-        assuming the interface is chains 0/1, so it stays correct when the
-        designed chain is not first or when extra chains/ligands are present.
-        """
+        """Mean inter-chain PAE (both directions) between the designed chain and
+        every other chain, via design_chain_index (not a hardcoded 0/1 pair)."""
         m = data.get("chain_pair_pae_min", [])
         n = len(m)
         if n < 2:
             return PAE_MAX
         i = self.config.design_chain_index
         if not (0 <= i < n):
-            i = 0  # fall back to the first chain if the index is out of range
+            i = 0
         vals = []
         for j in range(n):
             if j == i:
@@ -836,12 +762,8 @@ class AlphaFold3Environment(Environment):
             # Reward lower RMSD vs closed ref (reaching holo)
             reward += w.closed_rmsd * (1.0 - min(metrics["closed_rmsd"], 10.0) / 10.0)
 
-        # Clamp to [0, 1] for a stable, comparable reward scale. Note: if many
-        # variants in a group saturate at 1.0, the group std collapses and GRPO
-        # advantages vanish for that step (no gradient). With the default
-        # weights this is rare in practice (the PAE term keeps designs below the
-        # ceiling), but raise the ceiling or rescale the weights if you observe
-        # advantages flat-lining late in training.
+        # Clamp to [0, 1]. (If a whole group saturates at 1.0, GRPO advantages
+        # vanish for that step; rare with default weights.)
         return max(0.0, min(1.0, reward))
 
     @staticmethod
@@ -855,12 +777,7 @@ class AlphaFold3Environment(Environment):
 
     @staticmethod
     def _find_structure_path(directory: str) -> Optional[str]:
-        """Find a predicted structure CIF file.
-
-        AF3 writes a top-level ``*_model.cif`` (the ranked best) plus per-seed
-        ``*_sample-*.cif`` files, so match either ``model`` or ``sample`` —
-        matching only ``sample`` would miss the ranked model file.
-        """
+        """Find a predicted structure CIF (AF3 names them *_model.cif / *_sample-*.cif)."""
         for root, _, files in os.walk(directory):
             for f in files:
                 if f.endswith(".cif") and ("model" in f or "sample" in f):

@@ -1,10 +1,5 @@
-"""RMSD / DRMSD utilities for conformational-change assessment.
-
-Residue correspondence is positional (the i-th Cα of each array is paired), so
-the two coordinate sets must have equal length. A mismatch usually signals a
-wrong chain mapping, missing residues, or mismatched references and is treated
-as an error rather than silently truncated.
-"""
+"""RMSD / DRMSD utilities. Residue correspondence is positional, so inputs must
+be equal length; a mismatch is an error unless allow_truncate is set."""
 
 import logging
 
@@ -19,32 +14,13 @@ def calculate_rmsd(
     align: bool = True,
     allow_truncate: bool = False,
 ) -> float:
-    """Calculate RMSD between two equal-length coordinate sets (Kabsch alignment).
-
-    Args:
-        coords1: First coordinate set (N, 3)
-        coords2: Second coordinate set (N, 3)
-        align: Whether to perform Kabsch alignment first
-        allow_truncate: If True, truncate to the shorter length on mismatch
-            (with a warning) instead of raising. Off by default.
-
-    Returns:
-        RMSD in Angstroms.
-
-    Raises:
-        ValueError: if the inputs differ in length and ``allow_truncate`` is False.
-    """
+    """RMSD (Å) between two equal-length (N, 3) coordinate sets, with Kabsch alignment."""
     if len(coords1) != len(coords2):
         if not allow_truncate:
-            raise ValueError(
-                f"Coordinate length mismatch: {len(coords1)} vs {len(coords2)}. "
-                f"RMSD requires positional residue correspondence (equal lengths). "
-                f"Pass allow_truncate=True only if you intend to compare prefixes."
-            )
+            raise ValueError(f"Coordinate length mismatch: {len(coords1)} vs {len(coords2)}.")
         n = min(len(coords1), len(coords2))
-        logger.warning(f"Coordinate length mismatch: {len(coords1)} vs {len(coords2)}. Truncating to {n}.")
-        coords1 = coords1[:n]
-        coords2 = coords2[:n]
+        logger.warning(f"Length mismatch {len(coords1)} vs {len(coords2)}; truncating to {n}.")
+        coords1, coords2 = coords1[:n], coords2[:n]
 
     if len(coords1) == 0:
         return 0.0
@@ -77,25 +53,10 @@ def compute_local_drmsd(
     seq_sep: int = 6,
     allow_truncate: bool = False,
 ) -> float:
-    """Compute local distance RMSD (DRMSD) on sequence-local residue pairs.
-
-    Unlike global RMSD, this metric is IMMUNE to domain hinge motions
-    (open↔closed conformational change) but sensitive to true unfolding.
-    It compares pairwise Cα distances for residues within `seq_sep` positions.
-
-    Args:
-        ref_ca: Reference Cα coordinates (N, 3)
-        pred_ca: Predicted Cα coordinates (N, 3)
-        seq_sep: Maximum sequence separation to consider (default 6)
-
-    Returns:
-        local_drmsd: Local distance RMSD in Å (lower = fold preserved)
-    """
+    """Local distance RMSD over residue pairs within `seq_sep`: immune to hinge
+    motions (open↔closed) but sensitive to unfolding. Lower = fold preserved."""
     if len(ref_ca) != len(pred_ca) and not allow_truncate:
-        raise ValueError(
-            f"Coordinate length mismatch: {len(ref_ca)} vs {len(pred_ca)}. "
-            f"DRMSD requires positional residue correspondence (equal lengths)."
-        )
+        raise ValueError(f"Coordinate length mismatch: {len(ref_ca)} vs {len(pred_ca)}.")
     n = min(len(ref_ca), len(pred_ca))
     if n < 2:
         return 0.0

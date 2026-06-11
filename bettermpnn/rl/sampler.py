@@ -44,33 +44,19 @@ class Sampler:
         self.open_ref_ca = self._load_reference_ca(config.open_ref_pdb, config.design_chain_id, "open")
         self.closed_ref_ca = self._load_reference_ca(config.closed_ref_pdb, config.design_chain_id, "closed")
 
-        # Fail fast on a misconfigured reference: if a path was given but no Cα
-        # were extracted, the design_chain_id is almost certainly wrong — better
-        # to stop now than to silently disable the RMSD filter (fail-open).
-        if config.closed_ref_pdb and (self.closed_ref_ca is None or len(self.closed_ref_ca) == 0):
-            raise ValueError(
-                f"closed_ref_pdb={config.closed_ref_pdb} yielded no Cα atoms for "
-                f"chain '{config.design_chain_id}'. Check the path and design_chain_id."
-            )
-        if config.open_ref_pdb and (self.open_ref_ca is None or len(self.open_ref_ca) == 0):
-            raise ValueError(
-                f"open_ref_pdb={config.open_ref_pdb} yielded no Cα atoms for "
-                f"chain '{config.design_chain_id}'. Check the path and design_chain_id."
-            )
+        # Fail fast if a reference was given but extracted no Cα (wrong chain id).
+        for path, ca in ((config.closed_ref_pdb, self.closed_ref_ca),
+                         (config.open_ref_pdb, self.open_ref_ca)):
+            if path and (ca is None or len(ca) == 0):
+                raise ValueError(f"{path}: no Cα for chain '{config.design_chain_id}'.")
 
-        # Use open ref for conf_rmsd (conformational change = bound vs open)
-        # If no open ref was provided at all, fall back to the scaffold PDB.
+        # Fall back to the scaffold PDB if no open reference was provided.
         if self.open_ref_ca is None or len(self.open_ref_ca) == 0:
-            logger.warning("No open reference PDB available, trying scaffold PDB for RMSD")
+            logger.warning("No open reference PDB; using scaffold PDB for RMSD")
             self.open_ref_ca = self._load_reference_ca(config.pdb, config.design_chain_id, "scaffold")
 
-        # Specificity filtering uses the closed reference to detect decoy-induced
-        # closing; without it, specificity reduces to the decoy iPTM test only.
         if config.decoy_smiles and (self.closed_ref_ca is None or len(self.closed_ref_ca) == 0):
-            logger.info(
-                "Decoys configured without a closed reference: specificity will "
-                "be judged by decoy iPTM only (no conformational-closing check)."
-            )
+            logger.info("No closed reference: decoy specificity judged by iPTM only.")
 
         # Output setup
         os.makedirs(config.output_dir, exist_ok=True)
@@ -233,11 +219,8 @@ class Sampler:
         """Execute one sampling step: sample sequences → evaluate all seeds → decoy check → filter."""
         cfg = self.config
 
-        # Reseed per global step so each step draws a distinct, reproducible
-        # batch. Parallel array workers handle disjoint step ranges, so this
-        # also prevents different workers from sampling identical sequences.
         if cfg.seed is not None:
-            torch.manual_seed(cfg.seed + step)
+            torch.manual_seed(cfg.seed + step)  # distinct per step; avoids worker collisions
 
         # --- Sample sequences (frozen, no grad) ---
         design_positions = cfg.design.get_redesign_positions(cfg.chain)

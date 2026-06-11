@@ -62,9 +62,7 @@ def compute_grpo_loss(
     Returns:
         GRPOResult with total loss, mean KL, and policy loss.
     """
-    # Unbiased KL estimator: exp(ref - cur) - (ref - cur) - 1.
-    # Clamp the log-ratio before exp() so a token the current policy makes very
-    # unlikely (large ref - cur) can't overflow the estimator to +inf.
+    # Unbiased KL estimator: exp(ref - cur) - (ref - cur) - 1; clamp to avoid overflow.
     log_ratio = torch.clamp(ref_logps - current_logps, max=20.0)
     kl = torch.exp(log_ratio) - log_ratio - 1
 
