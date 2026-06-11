@@ -14,7 +14,7 @@ The three components:
 - **Environment** — Black-box scoring: `sequence → scalar reward`. Pluggable — AF3, Protenix, ESMFold, or any custom predictor
 - **GRPO** — Computes group-relative advantages and updates the agent with KL-regularized policy gradient
 
-Each step: sample N sequences → score them → compute advantages relative to the group mean → backpropagate GRPO loss → repeat. Each step samples fresh on-policy and takes a single update, so the importance ratio is 1 and no PPO-style clipping is needed.
+Each step: sample N sequences → score them → compute advantages relative to the group mean → backpropagate GRPO loss → repeat. Each step samples fresh on-policy and takes a single update, so the importance ratio is 1 and no PPO-style clipping is needed. The policy is kept in eval mode (dropout off) during sampling and log-prob evaluation so the log-probs are deterministic — the importance ratio stays exactly 1 and the step-0 KL is exactly 0; parameters remain trainable.
 
 **Two modes**
 

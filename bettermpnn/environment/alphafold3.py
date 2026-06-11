@@ -238,6 +238,7 @@ class AlphaFold3Environment(Environment):
                         else:
                             if want_open:
                                 open_rmsd = calculate_rmsd(pred_ca, open_ref_ca, align=True)
+                                # Fold-integrity DRMSD needs a reference; only the open ref is used.
                                 local_drmsd_val = compute_local_drmsd(open_ref_ca, pred_ca, seq_sep=6)
                             if want_closed:
                                 closed_rmsd = calculate_rmsd(pred_ca, closed_ref_ca, align=True)
@@ -561,15 +562,13 @@ class AlphaFold3Environment(Environment):
                         continue
                     parsed_seeds += 1
 
+                    cif_path = self._find_structure_in_dir(seed_dir)
                     iptm = metrics.get("iptm", 0.0)
                     if iptm > best_iptm:
                         best_iptm = iptm
-                        best_decoy_cif = self._find_structure_in_dir(seed_dir)
+                        best_decoy_cif = cif_path
 
-                    # For decoy, we care about the smallest RMSD to closed ref (does it close?)
-
-                    # Check closed_rmsd: decoy should NOT cause closing
-                    cif_path = self._find_structure_in_dir(seed_dir)
+                    # Decoy should NOT cause closing: track smallest closed_rmsd.
                     if cif_path and closed_ref_ca is not None and len(closed_ref_ca) > 0:
                         try:
                             pred_ca = extract_ca_from_cif(cif_path, design_chain_id)
