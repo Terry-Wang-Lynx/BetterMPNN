@@ -202,20 +202,39 @@ class AlphaFold3Environment(Environment):
                 closed_rmsd = None
                 local_drmsd_val = None
 
+                want_open = open_ref_ca is not None and len(open_ref_ca) > 0
+                want_closed = closed_ref_ca is not None and len(closed_ref_ca) > 0
+                rmsd_error = None
+
                 if cif_path:
                     try:
                         pred_ca = extract_ca_from_cif(cif_path, design_chain_id)
-                        if len(pred_ca) > 0:
-                            if open_ref_ca is not None and len(open_ref_ca) > 0:
+                        if len(pred_ca) == 0:
+                            rmsd_error = f"no Cα for chain {design_chain_id}"
+                        else:
+                            if want_open:
                                 open_rmsd = calculate_rmsd(pred_ca, open_ref_ca, align=True)
                                 local_drmsd_val = compute_local_drmsd(open_ref_ca, pred_ca, seq_sep=6)
-                            if closed_ref_ca is not None and len(closed_ref_ca) > 0:
+                            if want_closed:
                                 closed_rmsd = calculate_rmsd(pred_ca, closed_ref_ca, align=True)
                     except Exception as e:
-                        logger.warning(f"RMSD calculation failed for seed {seed_idx}: {e}")
+                        rmsd_error = str(e)
+                elif want_open or want_closed:
+                    rmsd_error = "no predicted structure CIF found"
 
-                # Apply filter
-                passed = self._check_filter(metrics, open_rmsd, closed_rmsd, local_drmsd_val, filter_config)
+                # Fail closed: if an RMSD reference was configured but we could
+                # not compute the required RMSD for this seed, the seed must not
+                # pass on iPTM alone (that would silently weaken the filter).
+                if (want_open or want_closed) and rmsd_error is not None:
+                    logger.warning(
+                        f"Seed {seed_idx} for {job_name}: RMSD required but not "
+                        f"computable ({rmsd_error}); failing this seed (fail-closed)."
+                    )
+                    passed = False
+                else:
+                    passed = self._check_filter(
+                        metrics, open_rmsd, closed_rmsd, local_drmsd_val, filter_config
+                    )
 
                 sr = SeedResult(
                     seed=seed_idx,
@@ -291,6 +310,22 @@ class AlphaFold3Environment(Environment):
         if num_seeds is not None and num_seeds > 0:
             data["modelSeeds"] = list(range(1, num_seeds + 1))
 
+        self._apply_designed_sequence(data, sequence)
+
+        job_dir = os.path.join(self.input_dir, job_name)
+        os.makedirs(job_dir, exist_ok=True)
+        json_path = os.path.join(job_dir, f"{job_name}.json")
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=2)
+        return json_path
+
+    def _apply_designed_sequence(self, data: dict, sequence: str) -> None:
+        """Substitute the designed sequence (and its single-sequence MSA) into
+        the design chain of an AF3 input ``data`` dict, in place.
+
+        Shared by the target/decoy/apo input builders so none of them can
+        silently drop the sequence. Raises on a misconfigured template.
+        """
         idx = self.config.design_chain_index
         sequences = data.get("sequences", [])
         if idx >= len(sequences):
@@ -336,13 +371,6 @@ class AlphaFold3Environment(Environment):
                     lines[1] = sequence
                 chain[msa_key] = "\n".join(lines)
 
-        job_dir = os.path.join(self.input_dir, job_name)
-        os.makedirs(job_dir, exist_ok=True)
-        json_path = os.path.join(job_dir, f"{job_name}.json")
-        with open(json_path, "w") as f:
-            json.dump(data, f, indent=2)
-        return json_path
-
     def _warn_once_chain_len(self, msg: str) -> None:
         """Emit the chain-length mismatch warning only once per run."""
         if not getattr(self, "_chain_len_warned", False):
@@ -370,22 +398,11 @@ class AlphaFold3Environment(Environment):
         if num_seeds > 0:
             data["modelSeeds"] = list(range(1, num_seeds + 1))
 
-        # Update protein sequence
-        idx = self.config.design_chain_index
-        sequences = data.get("sequences", [])
-        if idx < len(sequences):
-            chain = sequences[idx].get("protein", {})
-            chain["sequence"] = sequence
-            for msa_key in ("unpairedMsa", "pairedMsa"):
-                msa = chain.get(msa_key, "")
-                if msa:
-                    lines = msa.splitlines()
-                    if len(lines) >= 2:
-                        lines[1] = sequence
-                    chain[msa_key] = "\n".join(lines)
+        # Update protein sequence (shared strict path)
+        self._apply_designed_sequence(data, sequence)
 
         # Replace ligand SMILES with decoy
-        for seq_entry in sequences:
+        for seq_entry in data.get("sequences", []):
             if "ligand" in seq_entry:
                 seq_entry["ligand"]["smiles"] = decoy_smiles
                 break
@@ -413,21 +430,11 @@ class AlphaFold3Environment(Environment):
         if num_seeds > 0:
             data["modelSeeds"] = list(range(1, num_seeds + 1))
 
-        idx = self.config.design_chain_index
-        sequences = data.get("sequences", [])
-        if idx < len(sequences):
-            chain = sequences[idx].get("protein", {})
-            chain["sequence"] = sequence
-            for msa_key in ("unpairedMsa", "pairedMsa"):
-                msa = chain.get(msa_key, "")
-                if msa:
-                    lines = msa.splitlines()
-                    if len(lines) >= 2:
-                        lines[1] = sequence
-                    chain[msa_key] = "\n".join(lines)
+        # Update protein sequence (shared strict path)
+        self._apply_designed_sequence(data, sequence)
 
-        # Remove all ligand sequences
-        data["sequences"] = [seq for seq in sequences if "ligand" not in seq]
+        # Remove all ligand sequences (apo state)
+        data["sequences"] = [seq for seq in data.get("sequences", []) if "ligand" not in seq]
 
         job_dir = os.path.join(self.input_dir, job_name)
         os.makedirs(job_dir, exist_ok=True)
@@ -552,12 +559,14 @@ class AlphaFold3Environment(Environment):
 
             best_iptm = 0.0
             min_closed_rmsd = float("inf")  # worst-case (lowest) closed_rmsd for decoy
+            parsed_seeds = 0
 
             for seed_idx, seed_dir, summary_path in seed_dirs:
                 try:
                     metrics = self._parse_summary_file(summary_path)
                     if metrics is None:
                         continue
+                    parsed_seeds += 1
 
                     iptm = metrics.get("iptm", 0.0)
                     if iptm > best_iptm:
@@ -584,6 +593,18 @@ class AlphaFold3Environment(Environment):
             dr.best_iptm = best_iptm
             dr.min_closed_rmsd = min_closed_rmsd
             dr.structure_path = best_decoy_cif
+
+            if parsed_seeds == 0:
+                # AF3 "succeeded" but produced no parseable seed summary; we have
+                # no evidence the variant is specific against this decoy, so fail
+                # closed rather than certify specificity on default values.
+                logger.warning(
+                    f"Decoy {job_name}: no parseable AF3 seed output; marking "
+                    f"specificity as NOT passed (fail-closed)"
+                )
+                dr.passed_specificity = False
+                decoy_results.append(dr)
+                continue
 
             # Evaluate specificity
             dr.causes_closing = (min_closed_rmsd <= fc.decoy_closed_rmsd_min)

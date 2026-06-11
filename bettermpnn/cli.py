@@ -109,7 +109,13 @@ def main():
         step_range = None
         if args.step_range:
             parts = args.step_range.split("-")
-            step_range = (int(parts[0]), int(parts[1]))
+            try:
+                start, end = int(parts[0]), int(parts[1])
+            except (ValueError, IndexError):
+                parser.error(f"--step-range must be 'START-END' (0-indexed), got {args.step_range!r}")
+            if len(parts) != 2 or start < 0 or end < start:
+                parser.error(f"--step-range must be 'START-END' with 0 <= START <= END, got {args.step_range!r}")
+            step_range = (start, end)
             logger.info(f"Parallel mode: processing steps {step_range[0]}-{step_range[1]}")
 
         sampler = Sampler(mpnn, env, config)

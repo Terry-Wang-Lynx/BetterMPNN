@@ -53,7 +53,9 @@ def extract_ca_from_pdb(pdb_path: str, chain_id: str) -> np.ndarray:
                 z = float(line[46:54])
                 coords.append([x, y, z])
 
-    ca = np.array(coords, dtype=np.float64)
+    # Always return shape (N, 3) — including (0, 3) when empty — to match
+    # extract_ca_from_cif and keep downstream shape handling consistent.
+    ca = np.array(coords, dtype=np.float64) if coords else np.empty((0, 3))
     logger.debug(f"Extracted {len(ca)} Cα atoms from {pdb_path} chain {chain_id}")
     return ca
 

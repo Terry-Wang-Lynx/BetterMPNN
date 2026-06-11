@@ -1,9 +1,12 @@
 """Unified configuration for BetterMPNN."""
 
+import logging
 import re
 import yaml
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,18 +38,35 @@ class LigandConfig:
 class DesignConfig:
     """Design scope: which residues to redesign.
 
-    Format: ["A10", "A11", ...] where A is chain ID + residue number.
-    If empty, the entire masked chain is designed.
+    Format: ``["A10", "A11", ...]`` where the letter is the chain ID and the
+    number is the **1-based position within that chain's sequence** (i.e. the
+    1st, 10th, ... residue of the chain as parsed), not the PDB author residue
+    number. If empty, the entire masked chain is designed.
     """
     redesign_residues: List[str] = field(default_factory=list)
 
+    def __post_init__(self):
+        # Fail fast on malformed specs so a typo can't silently widen the design
+        # scope to the whole chain.
+        for entry in self.redesign_residues:
+            if not re.match(r'^[A-Za-z]\d+$', str(entry)):
+                raise ValueError(
+                    f"Invalid design.redesign_residues entry {entry!r}; expected "
+                    f"'<chain><position>' like 'A10'."
+                )
+
     def get_redesign_positions(self, chain: str) -> List[int]:
-        """Extract 1-based residue numbers for the given chain."""
+        """Extract 1-based chain-local positions for the given chain."""
         positions = []
         for entry in self.redesign_residues:
             m = re.match(r'^([A-Za-z])(\d+)$', entry)
             if m and m.group(1) == chain:
                 positions.append(int(m.group(2)))
+        if self.redesign_residues and not positions:
+            logger.warning(
+                f"design.redesign_residues is set but none of its entries match "
+                f"chain '{chain}'; the entire chain will be redesigned."
+            )
         return sorted(positions)
 
     def get_fixed_positions(self, chain: str, chain_length: int) -> List[int]:
