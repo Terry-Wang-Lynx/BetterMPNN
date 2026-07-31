@@ -1,5 +1,8 @@
 <h1 align="center">BetterMPNN</h1>
 
+> [!WARNING]
+> **Experimental validation status:** BetterMPNN has not undergone comprehensive, rigorous laboratory validation. Although this repository includes limited wet-lab results from selected applications, these observations do not establish the framework's general effectiveness, robustness, or reproducibility. All designed sequences and computational outputs should therefore be treated as research hypotheses requiring independent experimental validation.
+
 BetterMPNN is a reinforcement learning driven framework for protein sequence deep optimization. We use **Group Relative Policy Optimization (GRPO)** to fine-tune ProteinMPNN in specific tasks, enabling efficient protein sequence design through an exploration-evaluation-optimization loop. With a pluggable structure prediction environment as the reward signal, the framework can take a target from backbone to high-performance binders in hours when sampling is parallelized across GPUs on a cluster (single-GPU runs are correspondingly slower).
 
 ## Design
