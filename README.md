@@ -207,6 +207,7 @@ pytest -q
 **Design & Development**
 - Tianyi Wang (王天颐)
 - Yafei Chang (常雅斐)
+- Fusheng Liu (刘福生)
 
 **Wet Lab Validation**
 - Tianyi Wang (王天颐)
