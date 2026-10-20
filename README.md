@@ -38,7 +38,9 @@ By pre-computing the target's MSA and running AF3 in inference-only mode (no dat
 
 The following are wet-lab validation results from our own application of BetterMPNN (ShanghaiTech-iGEM-2025). The candidate sequences and assay data belong to that project and are not reproducible from this repository alone; the numbers are reported here for context.
 
-**Binder design — GZMK binder for a colloidal-gold test strip.** Candidates were drawn at random from the final sequence pool **without any virtual screening** and characterized by surface plasmon resonance (SPR): **10 of 12 (83%)** bound with micromolar-level affinity. A conventional RFdiffusion pipeline on the same target gave 2 of 57 (3.5%) under comparable selection.
+**Binder design — exploratory GZMK SPR screen.** Of the **10 candidates with interpretable SPR measurements, 8 were binding-positive for GZMK**. Micromolar-level affinities were reported for selected binders. This preliminary result describes the interpretable subset, not an overall design success rate.
+
+The [2025 iGEM Wiki](https://2025.igem.wiki/shanghaitech-china/software) documents the method and notes ongoing wet-lab validation; the SPR subset result above is reported here by the project team.
 
 **Odorant-binding protein (OBP) for gas sensing.** Applied to OBP design as a gas-sensitive material, producing designs with micromolar-level affinity for the target odorant molecules.
 
